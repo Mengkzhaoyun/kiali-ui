@@ -1,0 +1,57 @@
+platform: 10.11.92.33
+
+workspace:
+  base: /go
+  path: src/github.com/kiali/kiali-ui
+
+clone:
+  git:
+    image: registry.cn-qingdao.aliyuncs.com/wod/devops-git:1.0
+    dns: 223.5.5.5
+
+pipeline:
+  read-cache:
+    image: registry.cn-qingdao.aliyuncs.com/wod/devops-cache:1.0
+    pull: true
+    restore: true
+    check: yarn.lock
+    mount:
+      - ./node_modules
+    volumes:
+      - /data/cache/:/cache
+
+  build-node:
+    image: registry.cn-qingdao.aliyuncs.com/wod/devops-node:14.15.0-buster
+    dns: 223.5.5.5
+    volumes:
+      - /data/cache/yarn/:/usr/local/share/.cache/yarn
+    commands:
+      - yarn install --frozen-lockfile
+      - yarn build
+
+  store-cache:
+    image: registry.cn-qingdao.aliyuncs.com/wod/devops-cache:1.0
+    pull: true
+    rebuild: true
+    check: yarn.lock
+    mount:
+      - ./node_modules
+    volumes:
+      - /data/cache/:/cache
+
+  docker:
+    image: registry.cn-qingdao.aliyuncs.com/wod/devops-docker:1.0
+    dns: 223.5.5.5
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    base: registry.cn-qingdao.aliyuncs.com/wod/alpine:3.12
+    dockerfile: .beagle/dockerfile
+    repo: wod/kiali-ui
+    version: v1.28.0
+    args: "TARGETOS=linux,TARGETARCH=amd64"
+    registry: registry.cn-qingdao.aliyuncs.com
+    secrets: 
+      - source: REGISTRY_USER_ALIYUN
+        target: REGISTRY_USER
+      - source: REGISTRY_PASSWORD_ALIYUN
+        target: REGISTRY_PASSWORD
