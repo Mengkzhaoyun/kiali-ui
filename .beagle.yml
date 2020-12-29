@@ -25,6 +25,9 @@ pipeline:
     dns: 223.5.5.5
     volumes:
       - /data/cache/yarn/:/usr/local/share/.cache/yarn
+    environment:
+      - PUPPETEER_DOWNLOAD_HOST=https://npm.taobao.org/mirrors
+      - KIALI_ENV=production
     commands:
       - yarn install --frozen-lockfile
       - yarn build
