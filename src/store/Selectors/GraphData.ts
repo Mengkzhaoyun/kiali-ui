@@ -20,6 +20,7 @@ import { isIstioNamespace } from '../../config/ServerConfig';
 export const decorateGraphData = (graphData: GraphElements): DecoratedGraphElements => {
   const elementsDefaults = {
     edges: {
+      destPrincipal: undefined,
       grpc: NaN,
       grpcErr: NaN,
       grpcPercentErr: NaN,
@@ -29,12 +30,14 @@ export const decorateGraphData = (graphData: GraphElements): DecoratedGraphEleme
       http3xx: NaN,
       http4xx: NaN,
       http5xx: NaN,
+      httpNoResponse: NaN,
       httpPercentErr: NaN,
       httpPercentReq: NaN,
       isMTLS: -1,
       protocol: undefined,
       responses: undefined,
       responseTime: NaN,
+      sourcePrincipal: undefined,
       tcp: NaN
     },
     nodes: {
@@ -48,10 +51,12 @@ export const decorateGraphData = (graphData: GraphElements): DecoratedGraphEleme
       hasCB: undefined,
       hasMissingSC: undefined,
       hasVS: undefined,
+      health: undefined,
       httpIn: NaN,
       httpIn3xx: NaN,
       httpIn4xx: NaN,
       httpIn5xx: NaN,
+      httpInNoResponse: NaN,
       httpOut: NaN,
       isDead: undefined,
       isGroup: undefined,
@@ -78,6 +83,7 @@ export const decorateGraphData = (graphData: GraphElements): DecoratedGraphEleme
     grpc: {
       grpc: 0,
       grpcErr: 0,
+      grpcNoResponse: 0,
       grpcPercentErr: 0,
       grpcPercentReq: 0
     },
@@ -86,6 +92,7 @@ export const decorateGraphData = (graphData: GraphElements): DecoratedGraphEleme
       http3xx: 0,
       http4xx: 0,
       http5xx: 0,
+      httpNoResponse: 0,
       httpPercentErr: 0,
       httpPercentReq: 0
     },

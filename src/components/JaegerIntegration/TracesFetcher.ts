@@ -1,27 +1,28 @@
 import * as API from '../../services/Api';
 import * as AlertUtils from '../../utils/AlertUtils';
 import { JaegerTrace, JaegerError } from 'types/JaegerInfo';
-import { transformTraceData } from './JaegerResults';
-import { traceDurationUnits } from './AppTraces';
 import { TracingQuery } from 'types/Tracing';
 import { getTimeRangeMicros } from './JaegerHelper';
+import transformTraceData from './JaegerResults/transform';
+import { TargetKind } from 'types/Common';
 
 type FetchOptions = {
   namespace: string;
-  app: string;
-  intervalDuration: string;
+  target: string;
+  targetKind: TargetKind;
   spanLimit: number;
   tags: string;
 };
 
 export class TracesFetcher {
-  private traces: JaegerTrace[] = [];
   private lastFetchMicros: number | undefined = undefined;
-  private lastFetchError = false;
 
-  constructor(private onChange: (traces: JaegerTrace[]) => void, private onErrors: (err: JaegerError[]) => void) {}
+  constructor(
+    private onChange: (traces: JaegerTrace[], jaegerServiceName: string) => void,
+    private onErrors: (err: JaegerError[]) => void
+  ) {}
 
-  fetch = (opts: FetchOptions) => {
+  fetch = (opts: FetchOptions, oldTraces: JaegerTrace[]) => {
     const range = getTimeRangeMicros();
     if (range.to) {
       // Closed time frame (looking in past)
@@ -34,47 +35,40 @@ export class TracesFetcher {
       tags: opts.tags,
       limit: opts.spanLimit
     };
-    API.getJaegerTraces(opts.namespace, opts.app, q)
+    const apiCall =
+      opts.targetKind === 'app'
+        ? API.getAppTraces
+        : opts.targetKind === 'service'
+        ? API.getServiceTraces
+        : API.getWorkloadTraces;
+    apiCall(opts.namespace, opts.target, q)
       .then(response => {
-        this.lastFetchError = false;
-        const traces = response.data.data
+        const newTraces = response.data.data
           ? (response.data.data
               .map(trace => transformTraceData(trace))
               .filter(trace => trace !== null) as JaegerTrace[])
           : [];
-        if (this.lastFetchMicros) {
-          // Incremental refresh
-          this.traces = this.traces.filter(s => s.startTime >= range.from).concat(traces);
-        } else {
-          this.traces = traces;
-        }
+        const traces = this.lastFetchMicros
+          ? // Incremental refresh
+            oldTraces
+              .filter(t => t.startTime >= range.from)
+              // It may happen that a previous trace was updated. If so, replace it (remove from old).
+              .filter(oldTrace => !newTraces.map(newTrace => newTrace.traceID).includes(oldTrace.traceID))
+              .concat(newTraces)
+          : newTraces;
         // Update last fetch time only if we had some results
         // So that if Jaeger DB hadn't time to ingest data, it's still going to be fetched next time
         if (traces.length > 0) {
           this.lastFetchMicros = Math.max(...traces.map(s => s.startTime));
         }
-        this.onChange(this.filterTraces(opts.intervalDuration));
+        this.onChange(traces, response.data.jaegerServiceName);
         if (response.data.errors && response.data.errors.length > 0) {
           this.onErrors(response.data.errors);
         }
       })
       .catch(error => {
-        if (!this.lastFetchError) {
-          AlertUtils.addError('Could not fetch traces.', error);
-          this.lastFetchError = true;
-        }
+        AlertUtils.addError('Could not fetch traces.', error);
       });
-  };
-
-  filterTraces = (intervalDuration: string): JaegerTrace[] => {
-    if (intervalDuration === 'none') {
-      return this.traces;
-    }
-    const duration = intervalDuration.split('-');
-    const index = Object.keys(traceDurationUnits).findIndex(el => el === duration[2]);
-    const min = Number(duration[0]) * Math.pow(1000, index);
-    const max = Number(duration[1]) * Math.pow(1000, index);
-    return this.traces.filter(trace => trace.duration >= min && trace.duration <= max);
   };
 
   resetLastFetchTime() {

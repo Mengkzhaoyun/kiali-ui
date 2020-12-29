@@ -1,16 +1,13 @@
 import * as React from 'react';
 import { style } from 'typestyle';
 import { NodeType, SummaryPanelPropType, Protocol, DecoratedGraphNodeData } from '../../types/Graph';
-import { Health, healthNotAvailable } from '../../types/Health';
 import { IstioMetricsOptions, Reporter, Direction } from '../../types/MetricsOptions';
 import * as API from '../../services/Api';
 import * as M from '../../types/Metrics';
-import { Metric } from '../../types/Metrics';
 import { Response } from '../../services/Api';
 import { decoratedNodeData } from 'components/CytoscapeGraph/CytoscapeGraphUtils';
 import { PfColors } from 'components/Pf/PfColors';
 import { KialiIcon } from 'config/KialiIcon';
-import { CSSProperties } from 'typestyle/lib/types';
 
 export enum NodeMetricType {
   APP = 1,
@@ -27,18 +24,17 @@ export const summaryHeader: React.CSSProperties = {
   backgroundColor: PfColors.White
 };
 
-const summaryPanelCommon: CSSProperties = {
+export const summaryPanel = style({
   height: '100%',
   margin: 0,
   minWidth: '25em',
   overflowY: 'scroll',
   backgroundColor: PfColors.White,
-  width: '25em'
-};
-
-export const summaryPanel = style(summaryPanelCommon);
-export const summaryPanelTopSplit = style({ ...summaryPanelCommon, height: '50%' });
-export const summaryPanelBottomSplit = style({ ...summaryPanelCommon, height: '50%', overflowY: 'auto' });
+  width: '25em',
+  fontSize: 'var(--graph-side-panel--font-size)',
+  padding: 0,
+  position: 'relative'
+});
 
 export const summaryFont: React.CSSProperties = {
   fontSize: 'var(--graph-side-panel--font-size)'
@@ -57,23 +53,6 @@ export const shouldRefreshData = (prevProps: SummaryPanelPropType, nextProps: Su
     // Check if the target changed
     prevProps.data.summaryTarget !== nextProps.data.summaryTarget
   );
-};
-
-type HealthState = {
-  health?: Health;
-  healthLoading: boolean;
-};
-
-export const updateHealth = (summaryTarget: any, stateSetter: (hs: HealthState) => void) => {
-  const healthPromise = summaryTarget.data('healthPromise');
-  if (healthPromise) {
-    stateSetter({ healthLoading: true });
-    healthPromise
-      .then(h => stateSetter({ health: h, healthLoading: false }))
-      .catch(_err => stateSetter({ health: healthNotAvailable(), healthLoading: false }));
-  } else {
-    stateSetter({ health: undefined, healthLoading: false });
-  }
 };
 
 export const getNodeMetricType = (nodeData: DecoratedGraphNodeData): NodeMetricType => {
@@ -101,7 +80,7 @@ export const getNodeMetrics = (
   requestProtocol?: string,
   quantiles?: Array<string>,
   byLabels?: Array<string>
-): Promise<Response<M.Metrics>> => {
+): Promise<Response<M.IstioMetricsMap>> => {
   const nodeData = decoratedNodeData(node);
   const options: IstioMetricsOptions = {
     queryTime: props.queryTime,
@@ -130,18 +109,14 @@ export const getNodeMetrics = (
   }
 };
 
-export const mergeMetricsResponses = (promises: Promise<Response<M.Metrics>>[]): Promise<Response<M.Metrics>> => {
+export const mergeMetricsResponses = (
+  promises: Promise<Response<M.IstioMetricsMap>>[]
+): Promise<Response<M.IstioMetricsMap>> => {
   return Promise.all(promises).then(responses => {
-    const metrics: M.Metrics = {
-      metrics: {},
-      histograms: {}
-    };
+    const metrics: M.IstioMetricsMap = {};
     responses.forEach(r => {
-      Object.keys(r.data.metrics).forEach(k => {
-        metrics.metrics[k] = r.data.metrics[k];
-      });
-      Object.keys(r.data.histograms).forEach(k => {
-        metrics.histograms[k] = r.data.histograms[k];
+      Object.keys(r.data).forEach(k => {
+        metrics[k] = r.data[k];
       });
     });
     return {
@@ -150,24 +125,23 @@ export const mergeMetricsResponses = (promises: Promise<Response<M.Metrics>>[]):
   });
 };
 
-export const getFirstDatapoints = (metric: M.MetricGroup): M.Datapoint[] => {
-  return metric.matrix.length > 0 ? metric.matrix[0].values : [];
+export const getFirstDatapoints = (metric: M.Metric[] | undefined): M.Datapoint[] => {
+  return metric && metric.length > 0 ? metric[0].datapoints : [];
 };
 
 export const getDatapoints = (
-  mg: M.MetricGroup,
-  comparator: (metric: Metric, protocol?: Protocol) => boolean,
+  metrics: M.Metric[] | undefined,
+  comparator: (metric: M.Labels, protocol?: Protocol) => boolean,
   protocol?: Protocol
 ): M.Datapoint[] => {
   let dpsMap = new Map<number, M.Datapoint>();
-  if (mg && mg.matrix) {
-    const tsa: M.TimeSeries[] = mg.matrix;
-    for (let i = 0; i < tsa.length; ++i) {
-      const ts = tsa[i];
-      if (comparator(ts.metric, protocol)) {
+  if (metrics) {
+    for (let i = 0; i < metrics.length; ++i) {
+      const ts = metrics[i];
+      if (comparator(ts.labels, protocol)) {
         // Sum values, because several metrics can satisfy the comparator
         // E.g. with multiple active namespaces and node being an outsider, we need to sum datapoints for every active namespace
-        ts.values.forEach(dp => {
+        ts.datapoints.forEach(dp => {
           const val = Number(dp[1]);
           if (!isNaN(val)) {
             const current = dpsMap.get(dp[0]);

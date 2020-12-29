@@ -13,10 +13,10 @@ import {
   Grid,
   GridItem,
   Title,
-  TooltipPosition
+  Tooltip
 } from '@patternfly/react-core';
 import { CogsIcon } from '@patternfly/react-icons';
-import ValidationList from '../../../components/Validations/ValidationList';
+import PodStatus from './PodStatus';
 
 type WorkloadPodsProps = {
   namespace: string;
@@ -31,13 +31,13 @@ class WorkloadPods extends React.Component<WorkloadPodsProps> {
     // https://github.com/patternfly/patternfly-next/issues/2373
     return [
       { title: 'Status', transforms: [cellWidth(10) as any] },
-      { title: 'Name', transforms: [cellWidth(10) as any] },
-      { title: 'Created at', transforms: [cellWidth(10) as any] },
-      { title: 'Created by', transforms: [cellWidth(10) as any] },
-      { title: 'Labels', transforms: [cellWidth(60) as any] },
-      { title: 'Istio Init Containers', transforms: [cellWidth(60) as any] },
-      { title: 'Istio Containers', transforms: [cellWidth(60) as any] },
-      { title: 'Phase', transforms: [cellWidth(10) as any] }
+      { title: 'Name' },
+      { title: 'Created at' },
+      { title: 'Created by' },
+      { title: 'Labels' },
+      { title: 'Istio Init Containers' },
+      { title: 'Istio Containers' },
+      { title: 'Phase' }
     ];
   }
 
@@ -55,11 +55,32 @@ class WorkloadPods extends React.Component<WorkloadPodsProps> {
                 <EmptyStateBody>No Pods in workload {this.props.workload}</EmptyStateBody>
               </EmptyState>
             ),
-            props: { colSpan: 5 }
+            props: { colSpan: 8 }
           }
         ]
       }
     ];
+  }
+
+  phase(pod: Pod): React.ReactFragment {
+    const phase = !!pod.statusReason ? pod.statusReason : pod.status;
+    const tooltipPhase = !!pod.statusReason ? `${pod.status}: ${pod.statusReason}` : pod.status;
+    const tooltip = !!pod.statusMessage ? (
+      <>
+        {tooltipPhase}
+        <br></br>
+        {pod.statusMessage}
+      </>
+    ) : (
+      tooltipPhase
+    );
+    return (
+      <>
+        <Tooltip content={<>{tooltip}</>}>
+          <span style={{ whiteSpace: 'nowrap' }}>{phase}</span>
+        </Tooltip>
+      </>
+    );
   }
 
   rows(): IRow[] {
@@ -76,9 +97,7 @@ class WorkloadPods extends React.Component<WorkloadPodsProps> {
 
       rows.push({
         cells: [
-          {
-            title: <ValidationList tooltipPosition={TooltipPosition.auto} checks={validation.checks} />
-          },
+          { title: <PodStatus status={pod.proxyStatus} checks={validation.checks} /> },
           { title: <>{pod.name}</> },
           { title: <LocalTime time={pod.createdAt || ''} /> },
           {
@@ -90,7 +109,9 @@ class WorkloadPods extends React.Component<WorkloadPodsProps> {
           { title: <Labels key={'labels' + podIdx} labels={pod.labels} /> },
           { title: pod.istioInitContainers ? pod.istioInitContainers.map(c => `${c.image}`).join(', ') : '' },
           { title: pod.istioContainers ? pod.istioContainers.map(c => `${c.image}`).join(', ') : '' },
-          { title: <span style={{ whiteSpace: 'nowrap' }}>{pod.status}</span> }
+          {
+            title: this.phase(pod)
+          }
         ]
       });
       return rows;
@@ -110,6 +131,8 @@ class WorkloadPods extends React.Component<WorkloadPodsProps> {
                 aria-label={'list_workloads_pods'}
                 cells={this.columns()}
                 rows={this.rows()}
+                // This style is declared on _overrides.scss
+                className="table"
               >
                 <TableHeader />
                 <TableBody />

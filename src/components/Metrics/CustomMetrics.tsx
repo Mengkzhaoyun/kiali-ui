@@ -2,23 +2,13 @@ import * as React from 'react';
 import { connect } from 'react-redux';
 import { RouteComponentProps, withRouter } from 'react-router';
 import { Toolbar, ToolbarGroup, ToolbarItem, Grid, GridItem, Card, CardBody } from '@patternfly/react-core';
-import {
-  Dashboard,
-  DashboardModel,
-  DashboardQuery,
-  Aggregator,
-  ExternalLink,
-  Overlay,
-  RawOrBucket
-} from '@kiali/k-charted-pf4';
 import { style } from 'typestyle';
 
 import { serverConfig } from '../../config/ServerConfig';
 import history, { URLParam } from '../../app/History';
-import RefreshContainer from '../../components/Refresh/Refresh';
 import * as API from '../../services/Api';
 import { KialiAppState } from '../../store/Store';
-import { TimeRange, evalTimeRange } from '../../types/Common';
+import { TimeRange, evalTimeRange, TimeInMilliseconds, isEqualTimeRange } from '../../types/Common';
 import * as AlertUtils from '../../utils/AlertUtils';
 import { RenderComponentScroll } from '../../components/Nav/Page';
 import * as MetricsHelper from './Helper';
@@ -28,36 +18,45 @@ import MetricsRawAggregation from '../MetricsOptions/MetricsRawAggregation';
 import { GrafanaLinks } from './GrafanaLinks';
 import { MetricsObjectTypes } from 'types/Metrics';
 import { SpanOverlay, JaegerLineInfo } from './SpanOverlay';
-import TimeRangeComponent from 'components/Time/TimeRangeComponent';
-import { retrieveTimeRange, storeBounds } from 'components/Time/TimeRangeHelper';
-import { statLabel } from '@kiali/k-charted-pf4/dist/common/types/Labels';
-import { RightActionBar } from 'components/RightActionBar/RightActionBar';
+import { DashboardModel, ExternalLink } from 'types/Dashboards';
+import { Overlay } from 'types/Overlay';
+import { Aggregator, DashboardQuery } from 'types/MetricsOptions';
+import { RawOrBucket } from 'types/VictoryChartInfo';
+import { Dashboard } from 'components/Charts/Dashboard';
+import { ThunkDispatch } from 'redux-thunk';
+import { KialiAppAction } from '../../actions/KialiAppAction';
+import { bindActionCreators } from 'redux';
+import { UserSettingsActions } from '../../actions/UserSettingsActions';
+import { timeRangeSelector } from '../../store/Selectors';
 
 type MetricsState = {
   dashboard?: DashboardModel;
   labelsSettings: LabelsSettings;
   grafanaLinks: ExternalLink[];
   spanOverlay?: Overlay<JaegerLineInfo>;
-  timeRange: TimeRange;
 };
 
 type CustomMetricsProps = RouteComponentProps<{}> & {
   namespace: string;
   app: string;
   version?: string;
+  workload?: string;
   template: string;
 };
 
 type Props = CustomMetricsProps & {
   // Redux props
   jaegerIntegration: boolean;
+  lastRefreshAt: TimeInMilliseconds;
+  timeRange: TimeRange;
+  setTimeRange: (range: TimeRange) => void;
 };
 
 const displayFlex = style({
   display: 'flex'
 });
 
-export class CustomMetrics extends React.Component<Props, MetricsState> {
+class CustomMetrics extends React.Component<Props, MetricsState> {
   options: DashboardQuery;
   spanOverlay: SpanOverlay;
 
@@ -65,11 +64,10 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
     super(props);
 
     const settings = MetricsHelper.retrieveMetricsSettings();
-    const timeRange = retrieveTimeRange() || MetricsHelper.defaultMetricsDuration;
     this.options = this.initOptions(settings);
     // Initialize active filters from URL
-    this.state = { labelsSettings: settings.labelsSettings, grafanaLinks: [], timeRange: timeRange };
-    this.spanOverlay = new SpanOverlay(props.namespace, props.app, changed => this.setState({ spanOverlay: changed }));
+    this.state = { labelsSettings: settings.labelsSettings, grafanaLinks: [] };
+    this.spanOverlay = new SpanOverlay(changed => this.setState({ spanOverlay: changed }));
   }
 
   private initOptions(settings: MetricsSettings): DashboardQuery {
@@ -90,16 +88,38 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
     this.refresh();
   }
 
+  componentDidUpdate(prevProps: Props) {
+    if (
+      this.props.namespace !== prevProps.namespace ||
+      this.props.app !== prevProps.app ||
+      this.props.workload !== prevProps.workload ||
+      this.props.version !== prevProps.version ||
+      this.props.template !== prevProps.template ||
+      this.props.lastRefreshAt !== prevProps.lastRefreshAt ||
+      !isEqualTimeRange(this.props.timeRange, prevProps.timeRange)
+    ) {
+      const settings = MetricsHelper.retrieveMetricsSettings();
+      this.options = this.initOptions(settings);
+      this.spanOverlay.reset();
+      this.refresh();
+    }
+  }
+
   private refresh = () => {
     this.fetchMetrics();
     if (this.props.jaegerIntegration) {
-      this.spanOverlay.fetch(this.state.timeRange);
+      this.spanOverlay.fetch({
+        namespace: this.props.namespace,
+        target: this.props.workload || this.props.app,
+        targetKind: this.props.workload ? MetricsObjectTypes.WORKLOAD : MetricsObjectTypes.APP,
+        range: this.props.timeRange
+      });
     }
   };
 
   private fetchMetrics = () => {
     // Time range needs to be reevaluated everytime fetching
-    MetricsHelper.timeRangeToOptions(this.state.timeRange, this.options);
+    MetricsHelper.timeRangeToOptions(this.props.timeRange, this.options);
     API.getCustomDashboard(this.props.namespace, this.props.template, this.options)
       .then(response => {
         const labelsSettings = MetricsHelper.extractLabelsSettings(response.data, this.state.labelsSettings);
@@ -121,12 +141,6 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
 
   private onLabelsFiltersChanged = (labelsFilters: LabelsSettings) => {
     this.setState({ labelsSettings: labelsFilters });
-  };
-
-  private onTimeFrameChanged = (range: TimeRange) => {
-    this.setState({ timeRange: range }, () => {
-      this.refresh();
-    });
   };
 
   private onRawAggregationChanged = (aggregator: Aggregator) => {
@@ -152,8 +166,7 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
         from: dates[0].getTime(),
         to: dates[1].getTime()
       };
-      storeBounds(range);
-      this.onTimeFrameChanged(range);
+      this.props.setTimeRange(range);
     }
   }
 
@@ -163,15 +176,6 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
 
     return (
       <>
-        <RightActionBar>
-          <TimeRangeComponent
-            range={this.state.timeRange}
-            onChanged={this.onTimeFrameChanged}
-            tooltip={'Time range'}
-            allowCustom={true}
-          />
-          <RefreshContainer id="metrics-refresh" handleRefresh={this.refresh} hideLabel={true} />
-        </RightActionBar>
         <RenderComponentScroll>
           <Grid style={{ padding: '10px' }}>
             <GridItem span={12}>
@@ -186,7 +190,7 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
                       expandHandler={this.expandHandler}
                       onClick={this.onClickDataPoint}
                       overlay={this.state.spanOverlay}
-                      timeWindow={evalTimeRange(retrieveTimeRange() || MetricsHelper.defaultMetricsDuration)}
+                      timeWindow={evalTimeRange(this.props.timeRange)}
                       brushHandlers={{ onDomainChangeEnd: (_, props) => this.onDomainChange(props.currentDomain.x) }}
                     />
                   )}
@@ -201,10 +205,7 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
 
   private renderOptionsBar() {
     const hasHistograms =
-      this.state.dashboard !== undefined &&
-      this.state.dashboard.charts.some(chart => {
-        return chart.metrics.some(m => m.labelSet.hasOwnProperty(statLabel));
-      });
+      this.state.dashboard !== undefined && this.state.dashboard.charts.some(chart => chart.metrics.some(m => m.stat));
     return (
       <Toolbar style={{ paddingBottom: 8 }}>
         <ToolbarGroup>
@@ -247,12 +248,20 @@ export class CustomMetrics extends React.Component<Props, MetricsState> {
 
 const mapStateToProps = (state: KialiAppState) => {
   return {
-    jaegerIntegration: state.jaegerState.info ? state.jaegerState.info.integration : false
+    jaegerIntegration: state.jaegerState.info ? state.jaegerState.info.integration : false,
+    lastRefreshAt: state.globalState.lastRefreshAt,
+    timeRange: timeRangeSelector(state)
+  };
+};
+
+const mapDispatchToProps = (dispatch: ThunkDispatch<KialiAppState, void, KialiAppAction>) => {
+  return {
+    setTimeRange: bindActionCreators(UserSettingsActions.setTimeRange, dispatch)
   };
 };
 
 const CustomMetricsContainer = withRouter<RouteComponentProps<{}> & CustomMetricsProps, any>(
-  connect(mapStateToProps)(CustomMetrics)
+  connect(mapStateToProps, mapDispatchToProps)(CustomMetrics)
 );
 
 export default CustomMetricsContainer;

@@ -1,18 +1,11 @@
-import {
-  TimeSeries,
-  DashboardModel,
-  AggregationModel,
-  SingleLabelValues,
-  AllPromLabelsValues,
-  PromLabel,
-  MetricsQuery
-} from '@kiali/k-charted-pf4';
-
 import { MetricsSettings, LabelsSettings, Quantiles, LabelSettings } from '../MetricsOptions/MetricsSettings';
 import { boundsToDuration, guardTimeRange, TimeRange, DurationInSeconds } from '../../types/Common';
 import { computePrometheusRateParams } from '../../services/Prometheus';
 import history, { URLParam } from '../../app/History';
 import responseFlags from 'utils/ResponseFlags';
+import { AggregationModel, DashboardModel } from 'types/Dashboards';
+import { AllPromLabelsValues, Metric, PromLabel, SingleLabelValues } from 'types/Metrics';
+import { MetricsQuery } from 'types/MetricsOptions';
 
 // Default to 10 minutes. Showing timeseries to only 1 minute doesn't make so much sense.
 export const defaultMetricsDuration: DurationInSeconds = 600;
@@ -22,35 +15,34 @@ export const combineLabelsSettings = (newSettings: LabelsSettings, stateSettings
   // This is allowed because the labels filters state is managed only from this component,
   // so we can override them in props from state
   // LabelsSettings received from props contains the names of the filters with only a default on/off flag.
+  const result: LabelsSettings = new Map();
   newSettings.forEach((lblObj, promLabel) => {
+    const resultValues: SingleLabelValues = {};
     const stateObj = stateSettings.get(promLabel);
+    Object.entries(lblObj.values).forEach(e => {
+      resultValues[e[0]] = stateObj && stateObj.defaultValue === false ? false : e[1];
+    });
     if (stateObj) {
       lblObj.checked = stateObj.checked;
-      if (stateObj.defaultValue === false) {
-        // 1st pass: override default filters (this case only happens when filters are defined from URL)
-        Object.keys(lblObj.values).forEach(k => {
-          lblObj.values[k] = false;
-        });
-      }
-      // 2nd pass: retrieve previous filters
-      Object.keys(stateObj.values).forEach(k => {
-        lblObj.values[k] = stateObj.values[k];
+      Object.entries(stateObj.values).forEach(e => {
+        resultValues[e[0]] = e[1];
       });
     }
+    result.set(promLabel, { ...lblObj, values: resultValues });
   });
-  return newSettings;
+  return result;
 };
 
 export const extractLabelsSettingsOnSeries = (
-  series: TimeSeries[],
+  metrics: Metric[],
   aggregations: AggregationModel[],
   extracted: LabelsSettings
 ): void => {
-  series.forEach(ts => {
-    Object.keys(ts.labelSet).forEach(k => {
+  metrics.forEach(m => {
+    Object.keys(m.labels).forEach(k => {
       const agg = aggregations.find(a => a.label === k);
       if (agg) {
-        const value = ts.labelSet[k];
+        const value = m.labels[k];
         let lblObj = extracted.get(agg.label);
         if (!lblObj) {
           lblObj = {

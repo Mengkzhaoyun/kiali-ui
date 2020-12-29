@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Paths } from '../../config';
 import { Link } from 'react-router-dom';
 import { Breadcrumb, BreadcrumbItem } from '@patternfly/react-core';
-import { ActiveFiltersInfo, DEFAULT_LABEL_OPERATION } from '../../types/Filters';
 import { FilterSelected } from '../Filters/StatefulFilters';
 import { dicIstioType } from '../../types/IstioConfigList';
 
@@ -19,16 +18,21 @@ interface BreadCumbViewState {
   item: string;
   pathItem: string;
   istioType?: string;
+  extension: boolean;
 }
 
 const ItemNames = {
   applications: 'App',
   services: 'Service',
   workloads: 'Workload',
-  istio: 'Istio Object'
+  istio: 'Istio Object',
+  iter8: 'Iter8 Experiment'
 };
 
 const IstioName = 'Istio Config';
+const Iter8Name = 'Iter8 Experiments';
+const namespaceRegex = /namespaces\/([a-z0-9-]+)\/([a-z0-9-]+)\/([a-z0-9-]+)(\/([a-z0-9-.]+))?(\/([a-z0-9-]+))?/;
+const extNamespaceRegex = /extensions\/namespaces\/([a-z0-9-]+)\/([a-z0-9-]+)\/([a-z0-9-]+)(\/([a-z0-9-.]+))?(\/([a-z0-9-]+))?/;
 
 export class BreadcrumbView extends React.Component<BreadCumbViewProps, BreadCumbViewState> {
   static capitalize = (str: string) => {
@@ -46,8 +50,13 @@ export class BreadcrumbView extends React.Component<BreadCumbViewProps, BreadCum
   }
 
   updateItem = () => {
-    const namespaceRegex = /namespaces\/([a-z0-9-]+)\/([a-z0-9-]+)\/([a-z0-9-]+)(\/([a-z0-9-.]+))?(\/([a-z0-9-]+))?/;
-    const match = this.props.location.pathname.match(namespaceRegex) || [];
+    let regex = namespaceRegex;
+    let extension = false;
+    if (this.props.location.pathname.startsWith('/extensions')) {
+      regex = extNamespaceRegex;
+      extension = true;
+    }
+    const match = this.props.location.pathname.match(regex) || [];
     const ns = match[1];
     const page = Paths[match[2].toUpperCase()];
     const istioType = match[3];
@@ -57,7 +66,8 @@ export class BreadcrumbView extends React.Component<BreadCumbViewProps, BreadCum
       pathItem: page,
       item: itemName,
       itemName: ItemNames[page],
-      istioType: istioType
+      istioType: istioType,
+      extension: extension
     };
   };
 
@@ -72,32 +82,29 @@ export class BreadcrumbView extends React.Component<BreadCumbViewProps, BreadCum
   }
 
   cleanFilters = () => {
-    FilterSelected.setSelected({ filters: [], op: DEFAULT_LABEL_OPERATION });
-  };
-
-  updateTypeFilter = () => {
-    this.cleanFilters();
-    // When updateTypeFilter is called, selected filters are already updated with namespace. Just push additional type obj
-    const activeFilters: ActiveFiltersInfo = FilterSelected.getSelected();
-    activeFilters.filters.push({
-      id: 'Istio Type',
-      title: 'Istio Type',
-      value: dicIstioType[this.state.istioType || '']
-    });
-    FilterSelected.setSelected(activeFilters);
+    FilterSelected.resetFilters();
   };
 
   isIstio = () => {
     return this.state.pathItem === 'istio';
   };
 
+  isIter8 = () => {
+    return this.state.pathItem === 'iter8';
+  };
+
   getItemPage = () => {
-    return `/namespaces/${this.state.namespace}/${this.state.pathItem}/${this.state.item}`;
+    let path = `/namespaces/${this.state.namespace}/${this.state.pathItem}/${this.state.item}`;
+    if (this.state.extension) {
+      path = '/extensions' + path;
+    }
+    return path;
   };
 
   render() {
     const { namespace, item, istioType, pathItem } = this.state;
     const isIstio = this.isIstio();
+    const isIter8 = this.isIter8();
     const linkItem = isIstio ? (
       <BreadcrumbItem isActive={true}>{item}</BreadcrumbItem>
     ) : (
@@ -110,18 +117,26 @@ export class BreadcrumbView extends React.Component<BreadCumbViewProps, BreadCum
     return (
       <Breadcrumb>
         <BreadcrumbItem>
-          <Link to={`/${pathItem}`} onClick={this.cleanFilters}>
-            {isIstio ? IstioName : BreadcrumbView.capitalize(pathItem)}
+          <Link to={`/${this.state.extension ? 'extensions/' + pathItem : pathItem}`} onClick={this.cleanFilters}>
+            {isIstio ? IstioName : isIter8 ? Iter8Name : BreadcrumbView.capitalize(pathItem)}
           </Link>
         </BreadcrumbItem>
         <BreadcrumbItem>
-          <Link to={`/${pathItem}?namespaces=${namespace}`} onClick={this.cleanFilters}>
+          <Link
+            to={`/${this.state.extension ? 'extensions/' + pathItem : pathItem}?namespaces=${namespace}`}
+            onClick={this.cleanFilters}
+          >
             Namespace: {namespace}
           </Link>
         </BreadcrumbItem>
         {isIstio && (
           <BreadcrumbItem>
-            <Link to={`/${pathItem}?namespaces=${namespace}`} onClick={this.updateTypeFilter}>
+            <Link
+              to={`/${this.state.extension ? 'extensions/' + pathItem : pathItem}?namespaces=${namespace}&istiotype=${
+                dicIstioType[this.state.istioType || '']
+              }`}
+              onClick={this.cleanFilters}
+            >
               {istioType ? BreadcrumbView.istioType(istioType) : istioType}
             </Link>
           </BreadcrumbItem>

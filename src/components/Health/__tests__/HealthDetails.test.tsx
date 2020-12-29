@@ -4,25 +4,34 @@ import { shallowToJson } from 'enzyme-to-json';
 
 import { HealthDetails } from '../HealthDetails';
 import { ServiceHealth } from '../../../types/Health';
+import { setServerConfig } from '../../../config/ServerConfig';
+import { serverRateConfig } from '../../../types/__testData__/ErrorRateConfig';
 
 describe('HealthDetails', () => {
+  beforeAll(() => {
+    setServerConfig(serverRateConfig);
+  });
   it('renders healthy', () => {
     const health = new ServiceHealth(
-      { errorRatio: -1, inboundErrorRatio: -1, outboundErrorRatio: -1 },
+      'bookinfo',
+      'reviews',
+      { inbound: {}, outbound: {} },
       { rateInterval: 60, hasSidecar: true }
     );
 
-    const wrapper = shallow(<HealthDetails health={health} />);
+    const wrapper = shallow(<HealthDetails health={health} tooltip={true} />);
     expect(shallowToJson(wrapper)).toMatchSnapshot();
   });
 
   it('renders deployments failure', () => {
     const health = new ServiceHealth(
-      { errorRatio: -1, inboundErrorRatio: -1, outboundErrorRatio: -1 },
+      'bookinfo',
+      'reviews',
+      { inbound: {}, outbound: {} },
       { rateInterval: 60, hasSidecar: true }
     );
 
-    const wrapper = shallow(<HealthDetails health={health} />);
+    const wrapper = shallow(<HealthDetails health={health} tooltip={true} />);
     expect(shallowToJson(wrapper)).toMatchSnapshot();
   });
 });

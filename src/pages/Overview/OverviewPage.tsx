@@ -1,5 +1,6 @@
 import * as React from 'react';
 import {
+  Button,
   Card,
   CardActions,
   CardBody,
@@ -10,6 +11,7 @@ import {
   EmptyStateVariant,
   Grid,
   GridItem,
+  Modal,
   Title,
   Tooltip,
   TooltipPosition
@@ -17,7 +19,7 @@ import {
 import { style } from 'typestyle';
 import { AxiosError } from 'axios';
 import _ from 'lodash';
-import { FilterSelected } from '../../components/Filters/StatefulFilters';
+import { FilterSelected, StatefulFilters } from '../../components/Filters/StatefulFilters';
 import * as FilterHelper from '../../components/FilterList/FilterHelper';
 import * as API from '../../services/Api';
 import {
@@ -53,16 +55,23 @@ import { Link } from 'react-router-dom';
 import { Paths, serverConfig } from '../../config';
 import { PfColors } from '../../components/Pf/PfColors';
 import VirtualList from '../../components/VirtualList/VirtualList';
-import { StatefulFilters } from '../../components/Filters/StatefulFilters';
 import { OverviewNamespaceAction, OverviewNamespaceActions } from './OverviewNamespaceActions';
 import history from '../../app/History';
-import { buildNamespaceInjectionPatch } from '../../components/IstioWizards/WizardActions';
+import {
+  buildGraphAuthorizationPolicy,
+  buildNamespaceInjectionPatch
+} from '../../components/IstioWizards/WizardActions';
 import * as AlertUtils from '../../utils/AlertUtils';
+import { MessageType } from '../../types/MessageCenter';
+import GraphDataSource from '../../services/GraphDataSource';
+import { AuthorizationPolicy } from '../../types/IstioObjects';
+import { IstioPermissions } from '../../types/IstioConfigDetails';
+import { AUTHORIZATION_POLICIES } from '../IstioConfigNew/AuthorizationPolicyForm';
 
 const gridStyleCompact = style({
   backgroundColor: '#f5f5f5',
   paddingBottom: '20px',
-  marginTop: '20px'
+  marginTop: '0px'
 });
 
 const gridStyleList = style({
@@ -70,10 +79,10 @@ const gridStyleList = style({
   // The VirtualTable component has a different style than cards
   // We need to adjust the grid style if we are on compact vs list view
   padding: '0 !important',
-  marginTop: '20px'
+  marginTop: '0px'
 });
 
-const cardGridStyle = style({ borderTop: '2px solid #39a5dc', textAlign: 'center', marginTop: '10px' });
+const cardGridStyle = style({ borderTop: '2px solid #39a5dc', textAlign: 'center', marginTop: '0px' });
 
 const emptyStateStyle = style({
   height: '300px',
@@ -106,13 +115,6 @@ const cardNamespaceNameLongStyle = style({
   whiteSpace: 'nowrap'
 });
 
-// Yes, the 20px is a magic number to adjust the style as there are several chained components
-// with their own style.
-const overviewHeader = style({
-  backgroundColor: PfColors.White,
-  padding: '10px 20px 10px 10px'
-});
-
 enum Show {
   GRAPH,
   APPLICATIONS,
@@ -125,6 +127,10 @@ type State = {
   namespaces: NamespaceInfo[];
   type: OverviewType;
   displayMode: OverviewDisplayMode;
+  permissions: IstioPermissions;
+  showConfirmModal: boolean;
+  nsTarget: string;
+  opTarget: string;
 };
 
 type ReduxProps = {
@@ -146,7 +152,11 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
     this.state = {
       namespaces: [],
       type: OverviewToolbar.currentOverviewType(),
-      displayMode: OverviewDisplayMode.EXPAND
+      displayMode: OverviewDisplayMode.EXPAND,
+      permissions: {},
+      showConfirmModal: false,
+      nsTarget: '',
+      opTarget: ''
     };
   }
 
@@ -201,16 +211,22 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
           : OverviewDisplayMode.EXPAND;
         // Set state before actually fetching health
         this.setState(
-          {
-            type: type,
-            namespaces: Sorts.sortFunc(allNamespaces, sortField, isAscending),
-            displayMode: displayMode
+          prevState => {
+            return {
+              type: type,
+              namespaces: Sorts.sortFunc(allNamespaces, sortField, isAscending),
+              displayMode: displayMode,
+              showConfirmModal: prevState.showConfirmModal,
+              nsTarget: prevState.nsTarget,
+              opTarget: prevState.opTarget
+            };
           },
           () => {
             this.fetchHealth(isAscending, sortField, type);
             this.fetchTLS(isAscending, sortField);
             this.fetchValidations(isAscending, sortField);
-            if (displayMode === OverviewDisplayMode.EXPAND) {
+            this.fetchPermissions();
+            if (displayMode !== OverviewDisplayMode.COMPACT) {
               this.fetchMetrics();
             }
           }
@@ -314,10 +330,7 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
     return Promise.all(
       chunk.map(nsInfo => {
         return API.getNamespaceMetrics(nsInfo.name, optionsIn).then(rs => {
-          nsInfo.metrics = undefined;
-          if (rs.data.metrics.hasOwnProperty('request_count')) {
-            nsInfo.metrics = rs.data.metrics.request_count.matrix;
-          }
+          nsInfo.metrics = rs.data.request_count;
           return nsInfo;
         });
       })
@@ -375,15 +388,31 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
   fetchValidationChunk(chunk: NamespaceInfo[]) {
     return Promise.all(
       chunk.map(nsInfo => {
-        return API.getNamespaceValidations(nsInfo.name).then(rs => ({ validations: rs.data, nsInfo: nsInfo }));
+        return Promise.all([
+          API.getNamespaceValidations(nsInfo.name),
+          API.getIstioConfig(nsInfo.name, ['authorizationpolicies'], false, '', '')
+        ]).then(results => {
+          return { validations: results[0].data, istioConfig: results[1].data, nsInfo: nsInfo };
+        });
       })
     )
       .then(results => {
         results.forEach(result => {
           result.nsInfo.validations = result.validations;
+          result.nsInfo.istioConfig = result.istioConfig;
         });
       })
       .catch(err => this.handleAxiosError('Could not fetch validations status', err));
+  }
+
+  fetchPermissions() {
+    this.promises
+      .register('namespacepermissions', API.getIstioPermissions(this.state.namespaces.map(ns => ns.name)))
+      .then(result => {
+        this.setState({
+          permissions: result.data
+        });
+      });
   }
 
   handleAxiosError(message: string, error: AxiosError) {
@@ -444,56 +473,145 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
     // So we keep this wrapped in a showActions function.
     const namespaceActions: OverviewNamespaceAction[] = [
       {
+        isGroup: true,
         isSeparator: false,
-        title: 'Show Graph',
-        action: (ns: string) => this.show(Show.GRAPH, ns, this.state.type)
-      },
-      {
-        isSeparator: false,
-        title: 'Show Applications',
-        action: (ns: string) => this.show(Show.APPLICATIONS, ns, this.state.type)
-      },
-      {
-        isSeparator: false,
-        title: 'Show Workloads',
-        action: (ns: string) => this.show(Show.WORKLOADS, ns, this.state.type)
-      },
-      {
-        isSeparator: false,
-        title: 'Show Services',
-        action: (ns: string) => this.show(Show.SERVICES, ns, this.state.type)
-      },
-      {
-        isSeparator: false,
-        title: 'Show Istio Config',
-        action: (ns: string) => this.show(Show.ISTIO_CONFIG, ns, this.state.type)
+        isDisabled: false,
+        title: 'Show',
+        children: [
+          {
+            isGroup: true,
+            isSeparator: false,
+            isDisabled: false,
+            title: 'Graph',
+            action: (ns: string) => this.show(Show.GRAPH, ns, this.state.type)
+          },
+          {
+            isGroup: true,
+            isSeparator: false,
+            isDisabled: false,
+            title: 'Applications',
+            action: (ns: string) => this.show(Show.APPLICATIONS, ns, this.state.type)
+          },
+          {
+            isGroup: true,
+            isSeparator: false,
+            isDisabled: false,
+            title: 'Workloads',
+            action: (ns: string) => this.show(Show.WORKLOADS, ns, this.state.type)
+          },
+          {
+            isGroup: true,
+            isSeparator: false,
+            isDisabled: false,
+            title: 'Services',
+            action: (ns: string) => this.show(Show.SERVICES, ns, this.state.type)
+          },
+          {
+            isGroup: true,
+            isSeparator: false,
+            isDisabled: false,
+            title: 'Istio Config',
+            action: (ns: string) => this.show(Show.ISTIO_CONFIG, ns, this.state.type)
+          }
+        ]
       }
     ];
+    // We are going to assume that if the user can create/update Istio AuthorizationPolicies in a namespace
+    // then it can use the Istio Injection Actions.
+    // RBAC allow more fine granularity but Kiali won't check that in detail.
+    let canWrite = false;
+    if (
+      this.state.permissions &&
+      this.state.permissions[nsInfo.name] &&
+      this.state.permissions[nsInfo.name][AUTHORIZATION_POLICIES]
+    ) {
+      const resourcePermission = this.state.permissions[nsInfo.name][AUTHORIZATION_POLICIES];
+      canWrite = resourcePermission.create && resourcePermission.update && resourcePermission.delete;
+    }
+
     if (serverConfig.kialiFeatureFlags.istioInjectionAction) {
       namespaceActions.push({
-        isSeparator: true
+        isGroup: false,
+        isSeparator: true,
+        isDisabled: false
       });
-      if (nsInfo.labels && nsInfo.labels[serverConfig.istioLabels.injectionLabelName]) {
-        namespaceActions.push({
-          isSeparator: false,
-          title: 'Disable Auto Injection',
-          action: (ns: string) => this.onAddRemoveAutoInjection(ns, false)
-        });
+      const enableAction = {
+        isGroup: false,
+        isSeparator: false,
+        isDisabled: !canWrite,
+        title: 'Enable Auto Injection',
+        action: (ns: string) => this.onAddRemoveAutoInjection(ns, true, false)
+      };
+      const disableAction = {
+        isGroup: false,
+        isSeparator: false,
+        isDisabled: !canWrite,
+        title: 'Disable Auto Injection',
+        action: (ns: string) => this.onAddRemoveAutoInjection(ns, false, false)
+      };
+      const removeAction = {
+        isGroup: false,
+        isSeparator: false,
+        isDisabled: !canWrite,
+        title: 'Remove Auto Injection',
+        action: (ns: string) => this.onAddRemoveAutoInjection(ns, false, true)
+      };
+      if (
+        nsInfo.labels &&
+        nsInfo.labels[serverConfig.istioLabels.injectionLabelName] &&
+        nsInfo.labels[serverConfig.istioLabels.injectionLabelName] === 'enabled'
+      ) {
+        namespaceActions.push(disableAction);
+        namespaceActions.push(removeAction);
+      } else if (
+        nsInfo.labels &&
+        nsInfo.labels[serverConfig.istioLabels.injectionLabelName] &&
+        nsInfo.labels[serverConfig.istioLabels.injectionLabelName] === 'disabled'
+      ) {
+        namespaceActions.push(enableAction);
+        namespaceActions.push(removeAction);
       } else {
-        namespaceActions.push({
-          isSeparator: false,
-          title: 'Enable Auto Injection',
-          action: (ns: string) => this.onAddRemoveAutoInjection(ns, true)
-        });
+        namespaceActions.push(enableAction);
       }
+    }
+    namespaceActions.push({
+      isGroup: false,
+      isSeparator: true,
+      isDisabled: false
+    });
+    const aps = nsInfo.istioConfig?.authorizationPolicies || [];
+    const addAuthorizationAction = {
+      isGroup: false,
+      isSeparator: false,
+      isDisabled: !canWrite,
+      title: (aps.length === 0 ? 'Create ' : 'Update') + ' Traffic Policies',
+      action: (ns: string) => {
+        if (aps.length === 0) {
+          this.onCreateTrafficPolicies(ns);
+        } else {
+          this.onUpdateTrafficPolicies(ns);
+        }
+      }
+    };
+    const removeAuthorizationAction = {
+      isGroup: false,
+      isSeparator: false,
+      isDisabled: !canWrite,
+      title: 'Delete Traffic Policies',
+      action: (ns: string) => this.onDeleteTrafficPolicies(ns)
+    };
+    namespaceActions.push(addAuthorizationAction);
+    if (aps.length > 0) {
+      namespaceActions.push(removeAuthorizationAction);
     }
     return namespaceActions;
   };
 
-  onAddRemoveAutoInjection = (ns: string, enable: boolean): void => {
-    const jsonPatch = buildNamespaceInjectionPatch(enable);
+  onAddRemoveAutoInjection = (ns: string, enable: boolean, remove: boolean): void => {
+    const jsonPatch = buildNamespaceInjectionPatch(enable, remove);
     API.updateNamespace(ns, jsonPatch)
       .then(_ => {
+        AlertUtils.add('Namespace ' + ns + ' updated', 'default', MessageType.SUCCESS);
         this.load();
       })
       .catch(error => {
@@ -501,26 +619,145 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
       });
   };
 
+  onCreateTrafficPolicies = (ns: string) => {
+    this.onAddRemoveAuthorizationPolicy(ns, [], false);
+  };
+
+  onUpdateTrafficPolicies = (ns: string) => {
+    this.setState({
+      showConfirmModal: true,
+      nsTarget: ns,
+      opTarget: 'update'
+    });
+  };
+
+  onDeleteTrafficPolicies = (ns: string) => {
+    this.setState({
+      showConfirmModal: true,
+      nsTarget: ns,
+      opTarget: 'delete'
+    });
+  };
+
+  onAddRemoveAuthorizationPolicy = (
+    ns: string,
+    authorizationPolicies: AuthorizationPolicy[],
+    remove: boolean
+  ): void => {
+    if (authorizationPolicies.length > 0) {
+      this.promises
+        .registerAll(
+          'authorizationPoliciesDelete',
+          authorizationPolicies.map(ap => API.deleteIstioConfigDetail(ns, 'authorizationpolicies', ap.metadata.name))
+        )
+        .then(_ => {
+          if (!remove) {
+            this.createAuthorizationPolicies(ns, this.load);
+          } else {
+            this.load();
+          }
+        })
+        .catch(errorDelete => {
+          if (!errorDelete.isCanceled) {
+            AlertUtils.addError('Could not delete AuthorizationPolicies.', errorDelete);
+          }
+        });
+    } else {
+      if (!remove) {
+        this.createAuthorizationPolicies(ns, this.load);
+      } else {
+        AlertUtils.addInfo('Namespace ' + ns + " doesn't have AuthorizationPolicy config.");
+      }
+    }
+  };
+
+  createAuthorizationPolicies = (ns: string, callback: () => void) => {
+    const graphDataSource = new GraphDataSource();
+    graphDataSource.on('fetchSuccess', () => {
+      const aps = buildGraphAuthorizationPolicy(ns, graphDataSource.graphDefinition);
+      this.promises
+        .registerAll(
+          'authorizationPoliciesCreate',
+          aps.map(ap => API.createIstioConfigDetail(ns, 'authorizationpolicies', JSON.stringify(ap)))
+        )
+        .then(results => {
+          if (results.length > 0) {
+            AlertUtils.add('AuthorizationPolicies created for ' + ns + ' namespace.', 'default', MessageType.SUCCESS);
+          }
+          callback();
+        })
+        .catch(errorCreate => {
+          if (!errorCreate.isCanceled) {
+            AlertUtils.addError('Could not create AuthorizationPolicies.', errorCreate);
+          }
+        });
+    });
+    graphDataSource.on('fetchError', (errorMessage: string | null) => {
+      if (errorMessage !== '') {
+        errorMessage = 'Could not fetch traffic data: ' + errorMessage;
+      } else {
+        errorMessage = 'Could not fetch traffic data.';
+      }
+      AlertUtils.addError(errorMessage);
+    });
+    graphDataSource.fetchForNamespace(this.props.duration, ns);
+  };
+
+  hideConfirmModal = () => {
+    this.setState({
+      showConfirmModal: false,
+      nsTarget: '',
+      opTarget: ''
+    });
+  };
+
+  onConfirmModal = () => {
+    let aps: AuthorizationPolicy[] = [];
+    for (let i = 0; i < this.state.namespaces.length; i++) {
+      const nsInfo = this.state.namespaces[i];
+      if (this.state.namespaces[i].name === this.state.nsTarget) {
+        aps = nsInfo.istioConfig?.authorizationPolicies || [];
+        break;
+      }
+    }
+    const nsTarget = this.state.nsTarget;
+    const remove = this.state.opTarget === 'delete';
+    this.setState(
+      {
+        showConfirmModal: false,
+        nsTarget: '',
+        opTarget: ''
+      },
+      () => this.onAddRemoveAuthorizationPolicy(nsTarget, aps, remove)
+    );
+  };
+
   render() {
     const sm = this.state.displayMode === OverviewDisplayMode.COMPACT ? 3 : 6;
     const md = this.state.displayMode === OverviewDisplayMode.COMPACT ? 3 : 4;
-    const filteredNamespaces = Filters.filterBy(this.state.namespaces, FilterSelected.getSelected());
+    const filteredNamespaces = FilterHelper.runFilters(
+      this.state.namespaces,
+      Filters.availableFilters,
+      FilterSelected.getSelected()
+    );
     const namespaceActions = filteredNamespaces.map((ns, i) => {
       const actions = this.getNamespaceActions(ns);
       return <OverviewNamespaceActions key={'namespaceAction_' + i} namespace={ns.name} actions={actions} />;
     });
+    const modalAction =
+      this.state.opTarget.length > 0
+        ? this.state.opTarget.charAt(0).toLocaleUpperCase() + this.state.opTarget.slice(1)
+        : '';
     return (
       <>
-        <div className={overviewHeader}>
-          <OverviewToolbarContainer
-            onRefresh={this.load}
-            onError={FilterHelper.handleError}
-            sort={this.sort}
-            displayMode={this.state.displayMode}
-            setDisplayMode={this.setDisplayMode}
-            statefulFilterRef={this.sFOverviewToolbar}
-          />
-        </div>
+        <OverviewToolbarContainer
+          onRefresh={this.load}
+          onError={FilterHelper.handleError}
+          sort={this.sort}
+          displayMode={this.state.displayMode}
+          setDisplayMode={this.setDisplayMode}
+          statefulFilterRef={this.sFOverviewToolbar}
+        />
         {filteredNamespaces.length > 0 ? (
           <RenderComponentScroll
             className={this.state.displayMode === OverviewDisplayMode.LIST ? gridStyleList : gridStyleCompact}
@@ -537,7 +774,7 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
                 {filteredNamespaces.map((ns, i) => {
                   const isLongNs = ns.name.length > NS_LONG;
                   return (
-                    <GridItem sm={sm} md={md} key={'CardItem_' + ns.name} style={{ margin: '0px 10px 0 10px' }}>
+                    <GridItem sm={sm} md={md} key={'CardItem_' + ns.name} style={{ margin: '0px 5px 0 5px' }}>
                       <Card isCompact={true} className={cardGridStyle}>
                         <CardHead>
                           <CardActions>{namespaceActions[i]}</CardActions>
@@ -584,6 +821,26 @@ export class OverviewPage extends React.Component<OverviewProps, State> {
             </EmptyState>
           </div>
         )}
+        <Modal
+          isSmall={true}
+          title={'Confirm ' + modalAction + ' Traffic Policies ?'}
+          isOpen={this.state.showConfirmModal}
+          onClose={this.hideConfirmModal}
+          actions={[
+            <Button key="cancel" variant="secondary" onClick={this.hideConfirmModal}>
+              Cancel
+            </Button>,
+            <Button key="confirm" variant="danger" onClick={this.onConfirmModal}>
+              {modalAction}
+            </Button>
+          ]}
+        >
+          {'Namespace ' +
+            this.state.nsTarget +
+            ' has existing AuthorizationPolicy objects. Do you want to ' +
+            this.state.opTarget +
+            ' them ?'}
+        </Modal>
       </>
     );
   }

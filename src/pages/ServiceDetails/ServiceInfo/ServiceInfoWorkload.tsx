@@ -32,10 +32,10 @@ class ServiceInfoWorkload extends React.Component<ServiceInfoWorkloadProps> {
     // https://github.com/patternfly/patternfly-next/issues/2373
     return [
       { title: 'Name', transforms: [cellWidth(10) as any] },
-      { title: 'Type', transforms: [cellWidth(10) as any] },
-      { title: 'Labels', transforms: [cellWidth(60) as any] },
-      { title: 'Created at', transforms: [cellWidth(20) as any] },
-      { title: 'Resource version', transforms: [cellWidth(10) as any] }
+      { title: 'Type' },
+      { title: 'Labels' },
+      { title: 'Created at' },
+      { title: 'Resource version' }
     ];
   }
 
@@ -112,6 +112,8 @@ class ServiceInfoWorkload extends React.Component<ServiceInfoWorkloadProps> {
                 aria-label={'list_workloads'}
                 cells={this.columns()}
                 rows={this.rows()}
+                // This style is declared on _overrides.scss
+                className="table"
               >
                 <TableHeader />
                 <TableBody />

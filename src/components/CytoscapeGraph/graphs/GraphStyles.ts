@@ -6,7 +6,7 @@ import {
   PFColorVal,
   PFAlertColorVals
 } from '../../../components/Pf/PfColors';
-import { FAILURE, DEGRADED, REQUESTS_THRESHOLDS } from '../../../types/Health';
+import { FAILURE, DEGRADED } from '../../../types/Health';
 import {
   EdgeLabelMode,
   GraphType,
@@ -18,11 +18,15 @@ import {
 import { icons } from '../../../config';
 import NodeImageTopology from '../../../assets/img/node-background-topology.png';
 import NodeImageKey from '../../../assets/img/node-background-key.png';
-import { decoratedEdgeData, decoratedNodeData } from '../CytoscapeGraphUtils';
+import { decoratedEdgeData, decoratedNodeData, CyNode } from '../CytoscapeGraphUtils';
 import _ from 'lodash';
 import * as Cy from 'cytoscape';
 
+import { getEdgeHealth } from '../../../types/ErrorRate';
+
 export const DimClass = 'mousedim';
+export const HighlightClass = 'mousehighlight';
+export const HoveredClass = 'mousehover';
 
 let EdgeColor: PFColorVal;
 const EdgeColorDead = PfColors.Black500;
@@ -143,7 +147,7 @@ export class GraphStyles {
 
     const isGroup = data.isGroup;
 
-    if (ele.hasClass('mousehighlight')) {
+    if (ele.hasClass(HighlightClass)) {
       labelRawStyle += 'font-size: ' + NodeTextFontSizeHover + ';';
     }
 
@@ -189,7 +193,7 @@ export class GraphStyles {
         contentRawStyle += `background-color: ${NodeVersionParentBackgroundColor};`;
         contentRawStyle += `color: ${NodeVersionParentTextColor};`;
       }
-      if (ele.hasClass('mousehighlight')) {
+      if (ele.hasClass(HighlightClass)) {
         contentRawStyle += 'font-size: ' + NodeTextFontSizeHover + ';';
       }
 
@@ -276,32 +280,27 @@ export class GraphStyles {
     };
 
     const getEdgeColor = (ele: Cy.EdgeSingular): string => {
-      let rate = 0;
-      let pErr = 0;
       const edgeData = decoratedEdgeData(ele);
-      if (edgeData.http > 0) {
-        rate = edgeData.http;
-        pErr = edgeData.httpPercentErr > 0 ? edgeData.httpPercentErr : 0;
-      } else if (edgeData.grpc > 0) {
-        rate = edgeData.grpc;
-        pErr = edgeData.grpcPercentErr > 0 ? edgeData.grpcPercentErr : 0;
-      } else if (edgeData.tcp > 0) {
-        rate = edgeData.tcp;
-      }
 
-      if (rate === 0) {
+      if (!edgeData.hasTraffic) {
         return EdgeColorDead;
       }
       if (edgeData.protocol === 'tcp') {
         return EdgeColorTCPWithTraffic;
       }
-      if (pErr > REQUESTS_THRESHOLDS.failure) {
-        return EdgeColorFailure;
+
+      const sourceNodeData = decoratedNodeData(ele.source());
+      const destNodeData = decoratedNodeData(ele.target());
+      const statusEdge = getEdgeHealth(edgeData, sourceNodeData, destNodeData);
+
+      switch (statusEdge.status) {
+        case FAILURE:
+          return EdgeColorFailure;
+        case DEGRADED:
+          return EdgeColorDegraded;
+        default:
+          return EdgeColor;
       }
-      if (pErr > REQUESTS_THRESHOLDS.degraded) {
-        return EdgeColorDegraded;
-      }
-      return EdgeColor;
     };
 
     const getEdgeLabel = (ele: Cy.EdgeSingular, includeProtocol?: boolean): string => {
@@ -311,7 +310,7 @@ export class GraphStyles {
       const edgeData = decoratedEdgeData(ele);
 
       switch (edgeLabelMode) {
-        case EdgeLabelMode.REQUESTS_PER_SECOND: {
+        case EdgeLabelMode.REQUEST_RATE: {
           let rate = 0;
           let pErr = 0;
           if (edgeData.http > 0) {
@@ -349,7 +348,7 @@ export class GraphStyles {
           }
           break;
         }
-        case EdgeLabelMode.REQUESTS_PERCENTAGE: {
+        case EdgeLabelMode.REQUEST_DISTRIBUTION: {
           let pReq;
           if (edgeData.httpPercentReq > 0) {
             pReq = edgeData.httpPercentReq;
@@ -433,13 +432,14 @@ export class GraphStyles {
     };
 
     const getNodeBorderColor = (ele: Cy.NodeSingular): string => {
-      if (ele.hasClass(DEGRADED.name)) {
-        return NodeColorBorderDegraded;
+      switch (ele.data(CyNode.healthStatus)) {
+        case DEGRADED.name:
+          return NodeColorBorderDegraded;
+        case FAILURE.name:
+          return NodeColorBorderFailure;
+        default:
+          return NodeColorBorder;
       }
-      if (ele.hasClass(FAILURE.name)) {
-        return NodeColorBorderFailure;
-      }
-      return NodeColorBorder;
     };
 
     const getNodeShape = (ele: Cy.NodeSingular): Cy.Css.NodeShape => {
@@ -463,13 +463,14 @@ export class GraphStyles {
 
     const nodeSelectedStyle = {
       'border-color': (ele: Cy.NodeSingular) => {
-        if (ele.hasClass(DEGRADED.name)) {
-          return NodeColorBorderDegraded;
+        switch (ele.data(CyNode.healthStatus)) {
+          case DEGRADED.name:
+            return NodeColorBorderDegraded;
+          case FAILURE.name:
+            return NodeColorBorderFailure;
+          default:
+            return NodeColorBorderSelected;
         }
-        if (ele.hasClass(FAILURE.name)) {
-          return NodeColorBorderFailure;
-        }
-        return NodeColorBorderSelected;
       },
       'border-width': NodeBorderWidthSelected
     };
@@ -520,32 +521,34 @@ export class GraphStyles {
       },
       // Node is highlighted (see GraphHighlighter.ts)
       {
-        selector: 'node.mousehighlight',
+        selector: `node.${HighlightClass}`,
         style: {
           'font-size': NodeTextFontSizeHover
         }
       },
       // Node other than App Box is highlighted (see GraphHighlighter.ts)
       {
-        selector: 'node.mousehighlight[^isGroup]',
+        selector: `node.${HighlightClass}[^isGroup]`,
         style: {
           'background-color': (ele: Cy.NodeSingular) => {
-            if (ele.hasClass(DEGRADED.name)) {
-              return NodeColorFillHoverDegraded;
+            switch (ele.data(CyNode.healthStatus)) {
+              case DEGRADED.name:
+                return NodeColorFillHoverDegraded;
+              case FAILURE.name:
+                return NodeColorFillHoverFailure;
+              default:
+                return NodeColorFillHover;
             }
-            if (ele.hasClass(FAILURE.name)) {
-              return NodeColorFillHoverFailure;
-            }
-            return NodeColorFillHover;
           },
           'border-color': (ele: Cy.NodeSingular) => {
-            if (ele.hasClass(DEGRADED.name)) {
-              return NodeColorBorderDegraded;
+            switch (ele.data(CyNode.healthStatus)) {
+              case DEGRADED.name:
+                return NodeColorBorderDegraded;
+              case FAILURE.name:
+                return NodeColorBorderFailure;
+              default:
+                return NodeColorBorderHover;
             }
-            if (ele.hasClass(FAILURE.name)) {
-              return NodeColorBorderFailure;
-            }
-            return NodeColorBorderHover;
           }
         }
       },
@@ -595,13 +598,13 @@ export class GraphStyles {
         }
       },
       {
-        selector: 'edge.mousehighlight',
+        selector: `edge.${HighlightClass}`,
         style: {
           'font-size': EdgeTextFontSizeHover
         }
       },
       {
-        selector: 'edge.mousehover',
+        selector: `edge.${HoveredClass}`,
         style: {
           label: (ele: Cy.EdgeSingular) => {
             return getEdgeLabel(ele, true);

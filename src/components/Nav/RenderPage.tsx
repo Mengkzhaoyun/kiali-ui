@@ -1,7 +1,7 @@
 import React from 'react';
 import { Redirect, Route } from 'react-router-dom';
 import SwitchErrorBoundary from '../SwitchErrorBoundary/SwitchErrorBoundary';
-import { pathRoutes, defaultRoute, secondaryMastheadRoutes, extensionsRoutes } from '../../routes';
+import { pathRoutes, defaultRoute, extensionsRoutes } from '../../routes';
 import { Path } from '../../types/Routes';
 import { style } from 'typestyle';
 import { PfColors } from '../Pf/PfColors';
@@ -18,17 +18,11 @@ class RenderPage extends React.Component<{ isGraph: boolean }> {
     });
   }
 
-  renderSecondaryMastheadRoutes() {
-    return this.renderPaths(secondaryMastheadRoutes);
-  }
-
   renderPathRoutes() {
     const allPathRoutes = pathRoutes.concat(
       extensionsRoutes.filter(route => {
         // Extensions are conditionally rendered
-        if (route.path.startsWith('/extensions/threescale') && serverConfig.extensions!.threescale.enabled) {
-          return true;
-        } else if (route.path.includes('iter8') && serverConfig.extensions!.iter8.enabled) {
+        if (route.path.includes('iter8') && serverConfig.extensions!.iter8.enabled) {
           return true;
         }
         return false;
@@ -48,12 +42,7 @@ class RenderPage extends React.Component<{ isGraph: boolean }> {
         </SwitchErrorBoundary>
       </div>
     );
-    return (
-      <>
-        {this.renderSecondaryMastheadRoutes()}
-        {!this.props.isGraph ? <div className={containerGray}>{component}</div> : component}
-      </>
-    );
+    return <>{!this.props.isGraph ? <div className={containerGray}>{component}</div> : component}</>;
   }
 }
 

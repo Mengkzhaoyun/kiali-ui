@@ -10,12 +10,11 @@ import { MenuItem, Path } from './types/Routes';
 import GraphPageContainer from './pages/Graph/GraphPage';
 import { Paths } from './config';
 import ServiceDetailsPageContainer from './pages/ServiceDetails/ServiceDetailsPage';
-import DefaultSecondaryMasthead from './components/DefaultSecondaryMasthead/DefaultSecondaryMasthead';
 import IstioConfigNewPageContainer from './pages/IstioConfigNew/IstioConfigNewPage';
 import ExperimentListPage from './pages/extensions/iter8/Iter8ExperimentList/ExperimentListPage';
 import ExperimentCreatePageContainer from './pages/extensions/iter8/Iter8ExperimentDetails/ExperimentCreatePage';
 import ExperimentDetailsPage from './pages/extensions/iter8/Iter8ExperimentDetails/ExperimentDetailsPage';
-import ThreeScaleNewPageContainer from './pages/extensions/threescale/ThreeScaleNew/ThreeScaleNewPage';
+import ExperimentCreateFromFileContainer from './pages/extensions/iter8/Iter8ExperimentDetails/ExperimentCreateFromFile';
 
 /**
  * Return array of objects that describe vertical menu
@@ -50,11 +49,7 @@ const navItems: MenuItem[] = [
   {
     title: 'Istio Config',
     to: '/' + Paths.ISTIO,
-    pathsActive: [
-      new RegExp('^/namespaces/(.*)/' + Paths.ISTIO + '/(.*)'),
-      new RegExp('/' + Paths.ISTIO + '/new'),
-      new RegExp('/extensions/threescale/new')
-    ]
+    pathsActive: [new RegExp('^/namespaces/(.*)/' + Paths.ISTIO + '/(.*)'), new RegExp('/' + Paths.ISTIO + '/new')]
   },
   {
     title: 'Distributed Tracing',
@@ -148,43 +143,8 @@ const pathRoutes: Path[] = [
   }
 ];
 
-const secondaryMastheadRoutes: Path[] = [
-  {
-    path: '/' + Paths.APPLICATIONS,
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/' + Paths.SERVICES,
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/' + Paths.WORKLOADS,
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/' + Paths.ISTIO,
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/' + Paths.JAEGER,
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/extensions/threescale/new',
-    component: DefaultSecondaryMasthead
-  },
-  {
-    path: '/extensions/iter8',
-    component: DefaultSecondaryMasthead
-  }
-];
-
 const extensionsRoutes: Path[] = [
   // Keep routes ordered with the more specific URLs first
-  {
-    path: '/extensions/threescale/new',
-    component: ThreeScaleNewPageContainer
-  },
   // Extension will follow /extensions/<extension>/namespaces/:namespace/experiments/:name pattern
   // To make RenderPage.tsx routes easy to filter without regex
   {
@@ -196,9 +156,13 @@ const extensionsRoutes: Path[] = [
     component: ExperimentCreatePageContainer
   },
   {
+    path: '/extensions/iter8/newFromFile',
+    component: ExperimentCreateFromFileContainer
+  },
+  {
     path: '/extensions/iter8',
     component: ExperimentListPage
   }
 ];
 
-export { defaultRoute, navItems, extensionsItems, pathRoutes, secondaryMastheadRoutes, extensionsRoutes };
+export { defaultRoute, navItems, extensionsItems, pathRoutes, extensionsRoutes };

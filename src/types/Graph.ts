@@ -1,5 +1,6 @@
 import Namespace from './Namespace';
 import { DurationInSeconds, TimeInSeconds } from './Common';
+import { Health } from './Health';
 
 export interface Layout {
   name: string;
@@ -30,9 +31,9 @@ export interface SummaryPanelPropType {
 }
 
 export enum EdgeLabelMode {
-  NONE = 'noEdgeLabels',
-  REQUESTS_PER_SECOND = 'requestsPerSecond',
-  REQUESTS_PERCENTAGE = 'requestsPercentage',
+  NONE = 'noLabel',
+  REQUEST_RATE = 'requestRate',
+  REQUEST_DISTRIBUTION = 'requestDistribution',
   RESPONSE_TIME_95TH_PERCENTILE = 'responseTime'
 }
 
@@ -156,6 +157,11 @@ export const hasProtocolTraffic = (protocolTraffic: ProtocolTraffic): protocolTr
   );
 };
 
+export interface DestService {
+  namespace: string;
+  name: string;
+}
+
 // Node data expected from server
 export interface GraphNodeData {
   id: string;
@@ -168,7 +174,7 @@ export interface GraphNodeData {
   service?: string;
   aggregate?: string;
   aggregateValue?: string;
-  destServices?: any;
+  destServices?: DestService[];
   traffic?: ProtocolTraffic[];
   hasCB?: boolean;
   hasMissingSC?: boolean;
@@ -188,8 +194,10 @@ export interface GraphEdgeData {
   id: string;
   source: string;
   target: string;
-  traffic?: ProtocolTraffic;
+  destPrincipal?: string;
   responseTime?: number;
+  sourcePrincipal?: string;
+  traffic?: ProtocolTraffic;
   isMTLS?: number;
 }
 
@@ -217,11 +225,15 @@ export interface GraphDefinition {
 export interface DecoratedGraphNodeData extends GraphNodeData {
   grpcIn: number;
   grpcInErr: number;
+  grpcInNoResponse: number;
   grpcOut: number;
+  health: Health;
+  healthStatus: string; // status name
   httpIn: number;
   httpIn3xx: number;
   httpIn4xx: number;
   httpIn5xx: number;
+  httpInNoResponse: number;
   httpOut: number;
   tcpIn: number;
   tcpOut: number;
@@ -236,12 +248,14 @@ export interface DecoratedGraphNodeData extends GraphNodeData {
 export interface DecoratedGraphEdgeData extends GraphEdgeData {
   grpc: number;
   grpcErr: number;
+  grpcNoResponse: number;
   grpcPercentErr: number;
   grpcPercentReq: number;
   http: number;
   http3xx: number;
   http4xx: number;
   http5xx: number;
+  httpNoResponse: number;
   httpPercentErr: number;
   httpPercentReq: number;
   responses: Responses;

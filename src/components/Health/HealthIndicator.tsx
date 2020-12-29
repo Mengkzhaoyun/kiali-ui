@@ -71,20 +71,22 @@ export class HealthIndicator extends React.PureComponent<Props, HealthState> {
     return (
       <TextContent style={{ color: PfColors.White }}>
         <Text component={TextVariants.h2}>{this.state.globalStatus.name}</Text>
-        <HealthDetails health={health} />
+        <HealthDetails health={health} tooltip={true} />
       </TextContent>
     );
   }
 
   renderPopover(health: H.Health, icon: JSX.Element) {
-    return (
+    return health.getGlobalStatus() === H.HEALTHY ? (
+      icon
+    ) : (
       <Tooltip
         aria-label={'Health indicator'}
         content={this.renderHealthTooltip(health)}
         position={PopoverPosition.auto}
         className={'health_indicator'}
       >
-        {icon}
+        <>{icon}</>
       </Tooltip>
     );
   }

@@ -1,5 +1,5 @@
 import { IstioConfigDetails } from '../types/IstioConfigDetails';
-import { IstioObject } from '../types/IstioObjects';
+import { ConnectionPoolSettings, IstioObject, OutlierDetection } from '../types/IstioObjects';
 import _ from 'lodash';
 
 export const mergeJsonPatch = (objectModified: object, object?: object): object => {
@@ -34,44 +34,8 @@ export const getIstioObject = (istioObjectDetails?: IstioConfigDetails) => {
       istioObject = istioObjectDetails.workloadEntry;
     } else if (istioObjectDetails.envoyFilter) {
       istioObject = istioObjectDetails.envoyFilter;
-    } else if (istioObjectDetails.rule) {
-      istioObject = istioObjectDetails.rule;
-    } else if (istioObjectDetails.adapter) {
-      istioObject = istioObjectDetails.adapter;
-    } else if (istioObjectDetails.template) {
-      istioObject = istioObjectDetails.template;
-    } else if (istioObjectDetails.handler) {
-      istioObject = istioObjectDetails.handler;
-    } else if (istioObjectDetails.instance) {
-      istioObject = istioObjectDetails.instance;
-    } else if (istioObjectDetails.quotaSpec) {
-      istioObject = istioObjectDetails.quotaSpec;
-    } else if (istioObjectDetails.quotaSpecBinding) {
-      istioObject = istioObjectDetails.quotaSpecBinding;
-    } else if (istioObjectDetails.attributeManifest) {
-      istioObject = istioObjectDetails.attributeManifest;
-    } else if (istioObjectDetails.httpApiSpec) {
-      istioObject = istioObjectDetails.httpApiSpec;
-    } else if (istioObjectDetails.httpApiSpecBinding) {
-      istioObject = istioObjectDetails.httpApiSpecBinding;
-    } else if (istioObjectDetails.policy) {
-      istioObject = istioObjectDetails.policy;
-    } else if (istioObjectDetails.meshPolicy) {
-      istioObject = istioObjectDetails.meshPolicy;
-    } else if (istioObjectDetails.serviceMeshPolicy) {
-      istioObject = istioObjectDetails.serviceMeshPolicy;
-    } else if (istioObjectDetails.clusterRbacConfig) {
-      istioObject = istioObjectDetails.clusterRbacConfig;
-    } else if (istioObjectDetails.rbacConfig) {
-      istioObject = istioObjectDetails.rbacConfig;
     } else if (istioObjectDetails.authorizationPolicy) {
       istioObject = istioObjectDetails.authorizationPolicy;
-    } else if (istioObjectDetails.serviceMeshRbacConfig) {
-      istioObject = istioObjectDetails.serviceMeshRbacConfig;
-    } else if (istioObjectDetails.serviceRole) {
-      istioObject = istioObjectDetails.serviceRole;
-    } else if (istioObjectDetails.serviceRoleBinding) {
-      istioObject = istioObjectDetails.serviceRoleBinding;
     } else if (istioObjectDetails.peerAuthentication) {
       istioObject = istioObjectDetails.peerAuthentication;
     } else if (istioObjectDetails.requestAuthentication) {
@@ -86,6 +50,7 @@ export const getIstioObject = (istioObjectDetails?: IstioConfigDetails) => {
 const nsRegexp = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[-a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 const hostRegexp = /(?=^.{4,253}$)(^((?!-)(([a-zA-Z0-9-]{0,62}[a-zA-Z0-9])|\*)\.)+[a-zA-Z]{2,63}$)/;
 const ipRegexp = /^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))?$/;
+const durationRegexp = /^[\d]+\.?[\d]*(h|m|s|ms)$/;
 
 // Gateway hosts have namespace/dnsName with namespace optional
 export const isGatewayHostValid = (gatewayHost: string): boolean => {
@@ -143,6 +108,49 @@ export const isValidUrl = (url: string): boolean => {
   try {
     new URL(url);
   } catch (_) {
+    return false;
+  }
+  return true;
+};
+
+export const isValidDuration = (duration: string): boolean => {
+  if (duration === '0ms' || duration === '0s' || duration === '0m' || duration === '0h') {
+    return false;
+  }
+  return durationRegexp.test(duration);
+};
+
+export const isValidAbortStatusCode = (statusCode: number): boolean => {
+  return statusCode >= 100 && statusCode <= 599;
+};
+
+export const isValidConnectionPool = (connectionPool: ConnectionPoolSettings): boolean => {
+  if (connectionPool.tcp) {
+    if (connectionPool.tcp.connectTimeout && !isValidDuration(connectionPool.tcp.connectTimeout)) {
+      return false;
+    }
+    if (connectionPool.tcp.tcpKeepalive) {
+      if (connectionPool.tcp.tcpKeepalive.interval && !isValidDuration(connectionPool.tcp.tcpKeepalive.interval)) {
+        return false;
+      }
+      if (connectionPool.tcp.tcpKeepalive.time && !isValidDuration(connectionPool.tcp.tcpKeepalive.time)) {
+        return false;
+      }
+    }
+  }
+  if (connectionPool.http) {
+    if (connectionPool.http.idleTimeout && !isValidDuration(connectionPool.http.idleTimeout)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+export const isValidOutlierDetection = (outlierDetection: OutlierDetection): boolean => {
+  if (outlierDetection.interval && !isValidDuration(outlierDetection.interval)) {
+    return false;
+  }
+  if (outlierDetection.baseEjectionTime && !isValidDuration(outlierDetection.baseEjectionTime)) {
     return false;
   }
   return true;

@@ -14,7 +14,8 @@ import {
   ToolbarGroup,
   ToolbarItem,
   ToolbarSection,
-  SelectOptionObject
+  SelectOptionObject,
+  Button
 } from '@patternfly/react-core';
 import {
   ActiveFilter,
@@ -29,15 +30,18 @@ import * as FilterHelper from '../FilterList/FilterHelper';
 import { PromisesRegistry } from '../../utils/CancelablePromises';
 import { style } from 'typestyle';
 import { LabelFilters } from './LabelFilter';
-import { groupBy } from 'utils/Common';
+import { arrayEquals, groupBy } from 'utils/Common';
 import { labelFilter } from './CommonFilters';
 
 var classNames = require('classnames');
 
+const filterValuesStyle = style({
+  paddingTop: '10px'
+});
+
 export interface StatefulFiltersProps {
-  onFilterChange: () => void;
+  onFilterChange: (active: ActiveFiltersInfo) => void;
   initialFilters: FilterType[];
-  rightToolbar?: JSX.Element[];
   ref?: React.RefObject<StatefulFilters>;
 }
 
@@ -53,6 +57,22 @@ export class FilterSelected {
   static selectedFilters: ActiveFilter[] | undefined = undefined;
   static opSelected: LabelOperation;
 
+  static init = (filterTypes: FilterType[]) => {
+    let active = FilterSelected.getSelected();
+    if (!FilterSelected.isInitialized()) {
+      active = FilterHelper.getFiltersFromURL(filterTypes);
+      FilterSelected.setSelected(active);
+    } else if (!FilterHelper.filtersMatchURL(filterTypes, active)) {
+      active = FilterHelper.setFiltersToURL(filterTypes, active);
+      FilterSelected.setSelected(active);
+    }
+    return active;
+  };
+
+  static resetFilters = () => {
+    FilterSelected.selectedFilters = undefined;
+  };
+
   static setSelected = (activeFilters: ActiveFiltersInfo) => {
     FilterSelected.selectedFilters = activeFilters.filters;
     FilterSelected.opSelected = activeFilters.op;
@@ -67,10 +87,7 @@ export class FilterSelected {
   };
 }
 
-const rightToolbar = style({
-  marginLeft: 'auto'
-});
-
+const filterWithChildrenStyle = style({ borderRight: '1px solid #d1d1d1;', paddingRight: '10px', display: 'inherit' });
 const dividerStyle = style({ borderRight: '1px solid #d1d1d1;', padding: '10px', display: 'inherit' });
 const paddingStyle = style({ padding: '10px' });
 
@@ -79,26 +96,20 @@ export class StatefulFilters extends React.Component<StatefulFiltersProps, State
 
   constructor(props: StatefulFiltersProps) {
     super(props);
-
-    let active = FilterSelected.getSelected();
-    if (!FilterSelected.isInitialized()) {
-      active = FilterHelper.getFiltersFromURL(this.props.initialFilters);
-      FilterSelected.setSelected(active);
-    } else if (!FilterHelper.filtersMatchURL(this.props.initialFilters, active)) {
-      active = FilterHelper.setFiltersToURL(this.props.initialFilters, active);
-      FilterSelected.setSelected(active);
-    }
-
     this.state = {
       currentFilterType: this.props.initialFilters[0],
       filterTypes: this.props.initialFilters,
-      activeFilters: active,
+      activeFilters: FilterSelected.init(this.props.initialFilters),
       isExpanded: false,
       currentValue: ''
     };
   }
 
   componentDidMount() {
+    this.loadDynamicFilters();
+  }
+
+  private loadDynamicFilters() {
     // Call all loaders from FilterTypes and set results in state
     const filterTypePromises = this.props.initialFilters.map(ft => {
       if (ft.loader) {
@@ -118,11 +129,34 @@ export class StatefulFilters extends React.Component<StatefulFiltersProps, State
       }
     });
 
-    this.promises.registerAll('filterType', filterTypePromises).then(types => this.setState({ filterTypes: types }));
+    this.promises
+      .registerAll('filterType', filterTypePromises)
+      .then(types => this.setState({ filterTypes: types }))
+      .catch(err => {
+        if (!err.isCanceled) {
+          console.debug(err);
+        }
+      });
   }
 
-  componentDidUpdate(_prevProps: StatefulFiltersProps, _prevState: StatefulFiltersState, _snapshot: any) {
-    if (!FilterHelper.filtersMatchURL(this.state.filterTypes, this.state.activeFilters)) {
+  componentDidUpdate(prev: StatefulFiltersProps) {
+    // If the props filters changed (e.g. different values), some state update is necessary
+    if (
+      this.props.initialFilters !== prev.initialFilters &&
+      !arrayEquals(this.props.initialFilters, prev.initialFilters, (t1, t2) => {
+        return t1.id === t2.id && arrayEquals(t1.filterValues, t2.filterValues, (v1, v2) => v1 === v2);
+      })
+    ) {
+      const current =
+        this.props.initialFilters.find(f => f.id === this.state.currentFilterType.id) || this.props.initialFilters[0];
+      const active = FilterHelper.setFiltersToURL(this.props.initialFilters, this.state.activeFilters);
+      this.setState({
+        currentFilterType: current,
+        filterTypes: this.props.initialFilters,
+        activeFilters: active
+      });
+      this.loadDynamicFilters();
+    } else if (!FilterHelper.filtersMatchURL(this.state.filterTypes, this.state.activeFilters)) {
       FilterHelper.setFiltersToURL(this.state.filterTypes, this.state.activeFilters);
     }
   }
@@ -134,8 +168,8 @@ export class StatefulFilters extends React.Component<StatefulFiltersProps, State
   updateActiveFilters(activeFilters: ActiveFiltersInfo) {
     const cleanFilters = FilterHelper.setFiltersToURL(this.state.filterTypes, activeFilters);
     FilterSelected.setSelected(cleanFilters);
-    this.setState({ activeFilters: cleanFilters });
-    this.props.onFilterChange();
+    this.setState({ activeFilters: cleanFilters, currentValue: '' });
+    this.props.onFilterChange(cleanFilters);
   }
 
   filterAdded = (field: FilterType, value: string) => {
@@ -307,15 +341,6 @@ export class StatefulFilters extends React.Component<StatefulFiltersProps, State
     );
   };
 
-  renderRightToolbar = () => {
-    return (
-      <Toolbar className={rightToolbar}>
-        {this.props.rightToolbar ||
-          [].map((elem, index) => <ToolbarItem key={'Item_rightToolbar_' + index}>{elem}</ToolbarItem>)}
-      </Toolbar>
-    );
-  };
-
   onToggle = isExpanded => {
     this.setState({
       isExpanded: isExpanded
@@ -324,84 +349,90 @@ export class StatefulFilters extends React.Component<StatefulFiltersProps, State
 
   render() {
     const { currentFilterType, activeFilters } = this.state;
-    const path = window.location.pathname;
-    const isOverview = path.substr(path.lastIndexOf('/console') + '/console'.length + 1) === 'overview';
     return (
-      <Toolbar className="pf-l-toolbar pf-u-justify-content-space-between pf-u-mx-xl pf-u-my-md">
-        <ToolbarSection aria-label="ToolbarSection">
-          <ToolbarGroup style={{ marginRight: '0px' }}>
-            <ToolbarItem className={classNames(this.props.children ? dividerStyle : '', 'pf-u-mr-xl')}>
-              <FormSelect
-                value={currentFilterType.id}
-                aria-label={'filter_select_type'}
-                onChange={this.selectFilterType}
-                style={{ width: 'auto', backgroundColor: '#ededed', borderColor: '#bbb' }}
-              >
-                {this.state.filterTypes.map(option => (
-                  <FormSelectOption key={option.id} value={option.id} label={option.title} />
-                ))}
-              </FormSelect>
-              {this.renderInput()}
-            </ToolbarItem>
-          </ToolbarGroup>
-          {this.renderChildren()}
-          {(this.state.activeFilters.filters.filter(f => f.id === labelFilter.id).length > 0 ||
-            this.state.currentFilterType.filterType === FilterTypes.label) && (
-            <ToolbarGroup>
-              <ToolbarItem className={classNames('pf-u-mr-md')}>
-                <span className={classNames(paddingStyle)}>Label Operation</span>
+      <>
+        <Toolbar className="pf-l-toolbar pf-u-justify-content-space-between pf-u-mx-xl pf-u-my-md">
+          <ToolbarSection aria-label="ToolbarSection">
+            <ToolbarGroup style={{ marginRight: '0px' }}>
+              <ToolbarItem className={classNames(this.props.children ? filterWithChildrenStyle : '', 'pf-u-mr-xl')}>
                 <FormSelect
-                  value={activeFilters.op}
-                  onChange={value =>
-                    this.updateActiveFilters({ filters: this.state.activeFilters.filters, op: value as LabelOperation })
-                  }
-                  aria-label="filter_select_value"
-                  style={{ width: 'auto' }}
+                  value={currentFilterType.id}
+                  aria-label={'filter_select_type'}
+                  onChange={this.selectFilterType}
+                  style={{ width: 'auto', backgroundColor: '#ededed', borderColor: '#bbb' }}
                 >
-                  <FormSelectOption key={'filter_or'} value={'or'} label={'or'} />
-                  <FormSelectOption key={'filter_and'} value={'and'} label={'and'} />
+                  {this.state.filterTypes.map(option => (
+                    <FormSelectOption key={option.id} value={option.id} label={option.title} />
+                  ))}
                 </FormSelect>
+                {this.renderInput()}
               </ToolbarItem>
             </ToolbarGroup>
-          )}
-          {this.props.rightToolbar && this.renderRightToolbar()}
-        </ToolbarSection>
-        {activeFilters && activeFilters.filters.length > 0 && (
-          <ToolbarSection aria-label="FiltersSection" style={isOverview ? { marginLeft: '10px' } : {}}>
-            <>{'Active Filters:'}</>
-            <div style={{ marginLeft: '5px', display: 'inline-flex', height: '80%' }}>
-              <ChipGroup defaultIsOpen={true} withToolbar={true}>
-                {Object.entries(groupBy(activeFilters.filters, 'id')).map(([category, items]) => {
-                  // At least one item is present after groupBy, and all items inside category share the same title
-                  const title = items[0].title;
-                  return (
-                    <ChipGroupToolbarItem key={category} categoryName={title}>
-                      {items.map(item => (
-                        <Chip
-                          key={'filter_' + category + '_' + item.value}
-                          onClick={() => this.removeFilter(category, item.value)}
-                        >
-                          {item.value}
-                        </Chip>
-                      ))}
-                    </ChipGroupToolbarItem>
-                  );
-                })}
-              </ChipGroup>
-            </div>
-            <a
-              href="#"
-              onClick={e => {
-                e.preventDefault();
-                this.clearFilters();
-              }}
-              style={{ marginLeft: '5px' }}
-            >
-              Clear All Filters
-            </a>
+            {this.renderChildren()}
+            {(this.state.activeFilters.filters.filter(f => f.id === labelFilter.id).length > 0 ||
+              this.state.currentFilterType.filterType === FilterTypes.label) && (
+              <ToolbarGroup>
+                <ToolbarItem className={classNames('pf-u-mr-md')}>
+                  <span className={classNames(paddingStyle)}>Label Operation</span>
+                  <FormSelect
+                    value={activeFilters.op}
+                    onChange={value =>
+                      this.updateActiveFilters({
+                        filters: this.state.activeFilters.filters,
+                        op: value as LabelOperation
+                      })
+                    }
+                    aria-label="filter_select_value"
+                    style={{ width: 'auto' }}
+                  >
+                    <FormSelectOption key={'filter_or'} value={'or'} label={'or'} />
+                    <FormSelectOption key={'filter_and'} value={'and'} label={'and'} />
+                  </FormSelect>
+                </ToolbarItem>
+              </ToolbarGroup>
+            )}
           </ToolbarSection>
+        </Toolbar>
+        {activeFilters && activeFilters.filters.length > 0 && (
+          <div className={filterValuesStyle}>
+            <Toolbar className="pf-l-toolbar pf-u-justify-content-space-between pf-u-mx-xl pf-u-my-md">
+              <ToolbarSection aria-label="FiltersSection">
+                <>{'Active Filters:'}</>
+                <div style={{ marginLeft: '5px', display: 'inline-flex', height: '80%' }}>
+                  <ChipGroup defaultIsOpen={true} withToolbar={true}>
+                    {Object.entries(groupBy(activeFilters.filters, 'id')).map(([category, items]) => {
+                      // At least one item is present after groupBy, and all items inside category share the same title
+                      const title = items[0].title;
+                      return (
+                        <ChipGroupToolbarItem key={category} categoryName={title}>
+                          {items.map(item => (
+                            <Chip
+                              key={'filter_' + category + '_' + item.value}
+                              onClick={() => this.removeFilter(item.id, item.value)}
+                            >
+                              {item.value}
+                            </Chip>
+                          ))}
+                        </ChipGroupToolbarItem>
+                      );
+                    })}
+                  </ChipGroup>
+                </div>
+                <Button
+                  variant="link"
+                  onClick={e => {
+                    e.preventDefault();
+                    this.clearFilters();
+                  }}
+                  style={{ marginLeft: '5px' }}
+                >
+                  Clear All Filters
+                </Button>
+              </ToolbarSection>
+            </Toolbar>
+          </div>
         )}
-      </Toolbar>
+      </>
     );
   }
 }

@@ -6,17 +6,17 @@ import AppDescription from './AppInfo/AppDescription';
 import { App } from '../../types/App';
 import { RenderComponentScroll } from '../../components/Nav/Page';
 import './AppInfo.css';
-import { DurationInSeconds } from 'types/Common';
-import { DurationDropdownContainer } from 'components/DurationDropdown/DurationDropdown';
-import RefreshButtonContainer from 'components/Refresh/RefreshButton';
+import { DurationInSeconds, TimeInMilliseconds } from 'types/Common';
 import GraphDataSource from 'services/GraphDataSource';
 import { AppHealth } from 'types/Health';
-import { RightActionBar } from 'components/RightActionBar/RightActionBar';
+import { KialiAppState } from '../../store/Store';
+import { connect } from 'react-redux';
+import { durationSelector } from '../../store/Selectors';
 
 type AppInfoProps = {
   app?: App;
   duration: DurationInSeconds;
-  onRefresh: () => void;
+  lastRefreshAt: TimeInMilliseconds;
 };
 
 type AppInfoState = {
@@ -36,7 +36,7 @@ class AppInfo extends React.Component<AppInfoProps, AppInfoState> {
   }
 
   componentDidUpdate(prev: AppInfoProps) {
-    if (prev.duration !== this.props.duration || prev.app !== this.props.app) {
+    if (this.props.duration !== prev.duration || this.props.lastRefreshAt !== prev.lastRefreshAt) {
       this.fetchBackend();
     }
   }
@@ -55,12 +55,8 @@ class AppInfo extends React.Component<AppInfoProps, AppInfoState> {
   render() {
     return (
       <>
-        <RightActionBar>
-          <DurationDropdownContainer id="app-info-duration-dropdown" prefix="Last" />
-          <RefreshButtonContainer handleRefresh={this.fetchBackend} />
-        </RightActionBar>
         <RenderComponentScroll>
-          <Grid style={{ margin: '10px' }} gutter={'md'}>
+          <Grid gutter={'md'}>
             <GridItem span={12}>
               <AppDescription
                 app={this.props.app}
@@ -75,4 +71,10 @@ class AppInfo extends React.Component<AppInfoProps, AppInfoState> {
   }
 }
 
-export default AppInfo;
+const mapStateToProps = (state: KialiAppState) => ({
+  duration: durationSelector(state),
+  lastRefreshAt: state.globalState.lastRefreshAt
+});
+
+const AppInfoContainer = connect(mapStateToProps)(AppInfo);
+export default AppInfoContainer;

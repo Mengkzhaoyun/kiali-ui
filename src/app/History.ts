@@ -1,10 +1,15 @@
-import { createBrowserHistory, createMemoryHistory } from 'history';
+import { createBrowserHistory, createMemoryHistory, createHashHistory } from 'history';
 import { toValidDuration } from '../config/ServerConfig';
 import { BoundsInMilliseconds } from 'types/Common';
 
 const webRoot = (window as any).WEB_ROOT ? (window as any).WEB_ROOT : undefined;
 const baseName = webRoot && webRoot !== '/' ? webRoot + '/console' : '/console';
-const history = process.env.TEST_RUNNER ? createMemoryHistory() : createBrowserHistory({ basename: baseName });
+const historyMode = (window as any).HISTORY_MODE ? (window as any).HISTORY_MODE : 'browser';
+const history = process.env.TEST_RUNNER
+  ? createMemoryHistory()
+  : historyMode === 'hash'
+  ? createHashHistory()
+  : createBrowserHistory({ basename: baseName });
 
 export default history;
 
@@ -27,6 +32,7 @@ export enum URLParam {
   OPERATION_NODES = 'operationNodes',
   OVERVIEW_TYPE = 'otype',
   QUANTILES = 'quantiles',
+  RANGE_DURATION = 'rangeDuration',
   REFRESH_INTERVAL = 'refresh',
   REPORTER = 'reporter',
   SHOW_AVERAGE = 'avg',
@@ -109,6 +115,14 @@ export class HistoryManager {
     const duration = HistoryManager.getNumericParam(URLParam.DURATION, urlParams);
     if (duration) {
       return toValidDuration(Number(duration));
+    }
+    return undefined;
+  };
+
+  static getRangeDuration = (urlParams?: URLSearchParams): number | undefined => {
+    const rangeDuration = HistoryManager.getNumericParam(URLParam.RANGE_DURATION, urlParams);
+    if (rangeDuration) {
+      return toValidDuration(Number(rangeDuration));
     }
     return undefined;
   };

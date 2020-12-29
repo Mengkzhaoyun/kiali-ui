@@ -30,12 +30,12 @@ class WorkloadServices extends React.Component<WorkloadServicesProps> {
     // https://github.com/patternfly/patternfly-next/issues/2373
     return [
       { title: 'Name', transforms: [cellWidth(10) as any] },
-      { title: 'Created at', transforms: [cellWidth(10) as any] },
-      { title: 'Type', transforms: [cellWidth(10) as any] },
-      { title: 'Labels', transforms: [cellWidth(30) as any] },
-      { title: 'Resource Version', transforms: [cellWidth(10) as any] },
-      { title: 'Ip', transforms: [cellWidth(40) as any] },
-      { title: 'Ports', transforms: [cellWidth(20) as any] }
+      { title: 'Created at' },
+      { title: 'Type' },
+      { title: 'Labels' },
+      { title: 'Resource Version' },
+      { title: 'Ip' },
+      { title: 'Ports' }
     ];
   }
 
@@ -78,7 +78,7 @@ class WorkloadServices extends React.Component<WorkloadServicesProps> {
                 <EmptyStateBody>No Services in workload {this.props.workload}</EmptyStateBody>
               </EmptyState>
             ),
-            props: { colSpan: 5 }
+            props: { colSpan: 7 }
           }
         ]
       }
@@ -118,6 +118,8 @@ class WorkloadServices extends React.Component<WorkloadServicesProps> {
                 aria-label={'list_workloads_services'}
                 cells={this.columns()}
                 rows={this.rows()}
+                // This style is declared on _overrides.scss
+                className="table"
               >
                 <TableHeader />
                 <TableBody />

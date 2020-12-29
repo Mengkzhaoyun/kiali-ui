@@ -8,7 +8,6 @@ import EmptyGraphLayout from './EmptyGraphLayout';
 import { CytoscapeReactWrapper } from './CytoscapeReactWrapper';
 import * as CytoscapeGraphUtils from './CytoscapeGraphUtils';
 import { CyNode, isCore, isEdge, isNode } from './CytoscapeGraphUtils';
-import * as API from '../../services/Api';
 import {
   CytoscapeBaseEvent,
   CytoscapeClickEvent,
@@ -22,8 +21,6 @@ import {
   NodeType,
   UNKNOWN
 } from '../../types/Graph';
-import * as H from '../../types/Health';
-import { NamespaceAppHealth, NamespaceServiceHealth, NamespaceWorkloadHealth } from '../../types/Health';
 import { IntervalInMilliseconds, TimeInMilliseconds } from '../../types/Common';
 import FocusAnimation from './FocusAnimation';
 import { CytoscapeContextMenuWrapper, NodeContextMenuType, EdgeContextMenuType } from './CytoscapeContextMenu';
@@ -70,16 +67,6 @@ type CytoscapeGraphProps = {
   updateSummary?: (event: CytoscapeClickEvent) => void;
 };
 
-type Position = {
-  x: number;
-  y: number;
-};
-
-type InitialValues = {
-  position?: Position;
-  zoom?: number;
-};
-
 export interface GraphNodeTapEvent {
   aggregate?: string;
   aggregateValue?: string;
@@ -112,28 +99,25 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
   static tapTimeout: any;
   static readonly DataNodeId = 'data-node-id';
 
-  private graphHighlighter?: GraphHighlighter;
-  private trafficRenderer?: TrafficRender;
-  private focusSelector?: string;
-  private cytoscapeReactWrapperRef: any;
   private readonly contextMenuRef: React.RefObject<CytoscapeContextMenuWrapper>;
+  private cy?: Cy.Core;
+  private customViewport: boolean;
+  private cytoscapeReactWrapperRef: any;
+  private focusSelector?: string;
+  private graphHighlighter?: GraphHighlighter;
   private namespaceChanged: boolean;
   private nodeChanged: boolean;
   private resetSelection: boolean = false;
-  private initialValues: InitialValues;
-  private cy?: Cy.Core;
+  private trafficRenderer?: TrafficRender;
 
   constructor(props: CytoscapeGraphProps) {
     super(props);
+    this.contextMenuRef = React.createRef<CytoscapeContextMenuWrapper>();
+    this.customViewport = false;
+    this.cytoscapeReactWrapperRef = React.createRef();
     this.focusSelector = props.focusSelector;
     this.namespaceChanged = false;
     this.nodeChanged = false;
-    this.initialValues = {
-      position: undefined,
-      zoom: undefined
-    };
-    this.cytoscapeReactWrapperRef = React.createRef();
-    this.contextMenuRef = React.createRef<CytoscapeContextMenuWrapper>();
   }
 
   componentDidMount() {
@@ -211,12 +195,9 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
         this.selectTargetAndUpdateSummary(eles[0]);
       }
     }
-    if (this.props.graphData.elements !== prevProps.graphData.elements) {
-      this.updateHealth(cy);
-    }
 
     if (this.props.trace) {
-      showTrace(cy, this.props.trace);
+      showTrace(cy, this.props.graphData.fetchParams.graphType, this.props.trace);
     } else if (!this.props.trace && prevProps.trace) {
       hideTrace(cy);
     }
@@ -284,17 +265,8 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
   private onResize = () => {
     if (this.cy) {
       this.cy.resize();
-      const currentPosition = this.cy.pan();
-      const currentZoom = this.cy.zoom();
-      if (
-        this.initialValues.position &&
-        this.initialValues.position.x === currentPosition.x &&
-        this.initialValues.position.y === currentPosition.y &&
-        this.initialValues.zoom === currentZoom
-      ) {
-        // There was a resize, but we are in the initial pan/zoom state, we can fit again.
-        this.safeFit(this.cy);
-      }
+      // always fit to the newly sized space
+      this.safeFit(this.cy, true);
     }
   };
 
@@ -409,6 +381,21 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
       }
     });
 
+    cy.on('viewport', (evt: Cy.EventObject) => {
+      const cytoscapeEvent = getCytoscapeBaseEvent(evt);
+      if (cytoscapeEvent) {
+        this.customViewport = true;
+      }
+    });
+
+    // 'fit' is a custom event that we emit allowing us to reset cytoscapeGraph.customViewport
+    cy.on('fit', (evt: Cy.EventObject) => {
+      const cytoscapeEvent = getCytoscapeBaseEvent(evt);
+      if (cytoscapeEvent) {
+        this.customViewport = false;
+      }
+    });
+
     cy.on('nodehtml-create-or-update', 'node', (evt: Cy.EventObjectNode, data: any) => {
       const { label, isNew } = data;
       const { target } = evt;
@@ -515,7 +502,7 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
   }
 
   private focus(cy: Cy.Core) {
-    if (!!!this.focusSelector) {
+    if (!this.focusSelector) {
       return;
     }
 
@@ -544,11 +531,12 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
     new FocusAnimation(cy).start(selected);
   }
 
-  private safeFit(cy: Cy.Core) {
+  private safeFit(cy: Cy.Core, force?: boolean) {
+    if (!force && this.customViewport) {
+      return;
+    }
     this.focus(cy);
     CytoscapeGraphUtils.safeFit(cy);
-    this.initialValues.position = { ...cy.pan() };
-    this.initialValues.zoom = cy.zoom();
   }
 
   private processGraphUpdate(cy: Cy.Core, updateLayout: boolean) {
@@ -594,7 +582,6 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
     // Run layout and fit outside of the batch operation for it to take effect on the new nodes
     if (updateLayout) {
       CytoscapeGraphUtils.runLayout(cy, this.props.layout);
-      this.safeFit(cy);
     }
 
     // We opt-in for manual selection to be able to control when to select a node/edge
@@ -627,11 +614,6 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
       this.cy.$(':selected').selectify().unselect().unselectify();
       if (target && !isCore(target)) {
         target.selectify().select().unselectify();
-      }
-
-      if (this.props.setTraceId && this.props.trace && this.cy.$('.span:selected').length === 0) {
-        // No selected node in trace => clear trace selection
-        this.props.setTraceId(undefined);
       }
     }
   };
@@ -692,11 +674,6 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
     return needsRelayout;
   }
 
-  // Tests if the element is still in the current graph
-  private isElementValid(ele: Cy.NodeSingular | Cy.EdgeSingular) {
-    return ele.cy() === this.cy;
-  }
-
   static isCyNodeClickEvent(event: CytoscapeClickEvent): boolean {
     const targetType = event.summaryType;
     if (targetType !== 'node' && targetType !== 'group') {
@@ -741,95 +718,6 @@ export default class CytoscapeGraph extends React.Component<CytoscapeGraphProps>
       .map(e => e.id)
       .sort()
       .every((eId, index) => eId === aIds[index]);
-  }
-
-  private updateHealth(cy: Cy.Core) {
-    if (!cy) {
-      return;
-    }
-    const duration = this.props.graphData.fetchParams.duration;
-    // Keep a map of namespace x promises in order not to fetch several times the same data per namespace
-    const appHealthPerNamespace = new Map<string, Promise<NamespaceAppHealth>>();
-    const serviceHealthPerNamespace = new Map<string, Promise<NamespaceServiceHealth>>();
-    const workloadHealthPerNamespace = new Map<string, Promise<NamespaceWorkloadHealth>>();
-    // Asynchronously fetch health
-    cy.nodes().forEach(ele => {
-      const inaccessible = ele.data(CyNode.isInaccessible);
-      if (inaccessible) {
-        return;
-      }
-      const namespace = ele.data(CyNode.namespace);
-      const namespaceOk = namespace && namespace !== '' && namespace !== UNKNOWN;
-      // incomplete telemetry can result in an unknown namespace, if so set nodeType UNKNOWN
-      const nodeType = namespaceOk ? ele.data(CyNode.nodeType) : NodeType.UNKNOWN;
-      const workload = ele.data(CyNode.workload);
-      const workloadOk = workload && workload !== '' && workload !== UNKNOWN;
-      // use workload health when workload is set and valid (workload nodes or versionApp nodes)
-      const useWorkloadHealth = nodeType === NodeType.WORKLOAD || (nodeType === NodeType.APP && workloadOk);
-
-      if (useWorkloadHealth) {
-        let promise = workloadHealthPerNamespace.get(namespace);
-        if (!promise) {
-          promise = API.getNamespaceWorkloadHealth(namespace, duration);
-          workloadHealthPerNamespace.set(namespace, promise);
-        }
-        this.updateNodeHealth(ele, promise, workload);
-      } else if (nodeType === NodeType.APP) {
-        const app = ele.data(CyNode.app);
-        let promise = appHealthPerNamespace.get(namespace);
-        if (!promise) {
-          promise = API.getNamespaceAppHealth(namespace, duration);
-          appHealthPerNamespace.set(namespace, promise);
-        }
-        this.updateNodeHealth(ele, promise, app);
-        // TODO: If we want to block health checks for service entries, uncomment this (see kiali-2029)
-        // } else if (nodeType === NodeType.SERVICE && !ele.data(CyNode.isServiceEntry)) {
-      } else if (nodeType === NodeType.SERVICE) {
-        const service = ele.data(CyNode.service);
-
-        let promise = serviceHealthPerNamespace.get(namespace);
-        if (!promise) {
-          promise = API.getNamespaceServiceHealth(namespace, duration);
-          serviceHealthPerNamespace.set(namespace, promise);
-        }
-        this.updateNodeHealth(ele, promise, service);
-      }
-    });
-  }
-
-  private updateNodeHealth(
-    ele: Cy.NodeSingular,
-    promise: Promise<H.NamespaceAppHealth | H.NamespaceServiceHealth | H.NamespaceWorkloadHealth>,
-    key: string
-  ) {
-    ele.data(
-      'healthPromise',
-      promise.then(nsHealth => nsHealth[key])
-    );
-    promise
-      .then(nsHealth => {
-        // Discard if the element is no longer valid
-        if (this.isElementValid(ele)) {
-          const health = nsHealth[key];
-          if (health) {
-            const status = health.getGlobalStatus();
-            ele.removeClass(H.DEGRADED.name + ' ' + H.FAILURE.name);
-            if (status === H.DEGRADED || status === H.FAILURE) {
-              ele.addClass(status.name);
-            }
-          } else {
-            ele.removeClass(`${H.DEGRADED.name}  ${H.FAILURE.name} ${H.HEALTHY.name}`);
-            console.debug(`No health found for [${ele.data(CyNode.nodeType)}] [${key}]`);
-          }
-        }
-      })
-      .catch(err => {
-        // Discard if the element is no longer valid
-        if (this.isElementValid(ele)) {
-          ele.removeClass(`${H.DEGRADED.name}  ${H.FAILURE.name} ${H.HEALTHY.name}`);
-        }
-        console.error(`Could not fetch health for [${ele.data(CyNode.nodeType)}] [${key}]: ${API.getErrorString(err)}`);
-      });
   }
 
   private fixLoopOverlap(cy: Cy.Core) {

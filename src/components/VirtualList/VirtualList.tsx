@@ -14,6 +14,15 @@ import * as FilterHelper from '../FilterList/FilterHelper';
 import * as Sorts from '../../pages/Overview/Sorts';
 import { StatefulFilters } from '../Filters/StatefulFilters';
 
+// ******************************
+// VirtualList and its associated classes are intended to be used for main list pages: Applications,
+// Workloads, Services and Istio Config. They share common style and filter integration. They have
+// have limitations in scenarios where different personalization is needed (columns style, or layout).
+// For a secondary list, rendered inside a detail page, it is recommended the imple be based on a
+// Table component, such as in WorkloadServices, WorkloadPods, ServiceInfoWorkload, IstioConfigSubList,
+// or TrafficListComponent.
+// ******************************
+
 type Direction = 'asc' | 'desc' | undefined;
 
 type VirtualListProps<R> = {
@@ -144,17 +153,28 @@ class VirtualListC<R extends RenderResource> extends React.Component<VirtualList
             ) : (
               <tr>
                 <td colSpan={tableProps.cells.length}>
-                  <EmptyState variant={EmptyStateVariant.full}>
-                    <Title headingLevel="h5" size="lg">
-                      No {typeDisplay} found
-                    </Title>
-                    <EmptyStateBody>
-                      No {typeDisplay} in namespace
-                      {this.props.activeNamespaces.length === 1
-                        ? ` ${this.props.activeNamespaces[0].name}`
-                        : `s: ${this.props.activeNamespaces.map(ns => ns.name).join(', ')}`}
-                    </EmptyStateBody>
-                  </EmptyState>
+                  {this.props.activeNamespaces.length > 0 ? (
+                    <EmptyState variant={EmptyStateVariant.full}>
+                      <Title headingLevel="h5" size="lg">
+                        No {typeDisplay} found
+                      </Title>
+                      <EmptyStateBody>
+                        No {typeDisplay} in namespace
+                        {this.props.activeNamespaces.length === 1
+                          ? ` ${this.props.activeNamespaces[0].name}`
+                          : `s: ${this.props.activeNamespaces.map(ns => ns.name).join(', ')}`}
+                      </EmptyStateBody>
+                    </EmptyState>
+                  ) : (
+                    <EmptyState variant={EmptyStateVariant.full}>
+                      <Title headingLevel="h5" size="lg">
+                        No namespace is selected
+                      </Title>
+                      <EmptyStateBody>
+                        There is currently no namespace selected, please select one using the Namespace selector.
+                      </EmptyStateBody>
+                    </EmptyState>
+                  )}
                 </td>
               </tr>
             )}

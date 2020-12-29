@@ -1,36 +1,20 @@
 import Namespace from './Namespace';
-import { AceOptions } from 'react-ace';
 import { ResourcePermissions } from './Permissions';
 import {
   AuthorizationPolicy,
   DestinationRule,
   Gateway,
-  IstioAdapter,
-  IstioRule,
-  IstioTemplate,
-  Policy,
-  QuotaSpec,
-  QuotaSpecBinding,
   ServiceEntry,
   VirtualService,
   ObjectValidation,
-  RbacConfig,
-  ServiceRole,
-  ServiceRoleBinding,
-  ClusterRbacConfig,
   Sidecar,
-  ServiceMeshRbacConfig,
   IstioObject,
   PeerAuthentication,
   RequestAuthentication,
   WorkloadEntry,
-  EnvoyFilter,
-  AttributeManifest,
-  HTTPAPISpec,
-  HTTPAPISpecBinding,
-  IstioHandler,
-  IstioInstance
+  EnvoyFilter
 } from './IstioObjects';
+import { AceOptions } from 'react-ace/types';
 
 export interface IstioConfigId {
   namespace: string;
@@ -48,25 +32,7 @@ export interface IstioConfigDetails {
   sidecar: Sidecar;
   workloadEntry: WorkloadEntry;
   envoyFilter: EnvoyFilter;
-  rule: IstioRule;
-  adapter: IstioAdapter;
-  template: IstioTemplate;
-  handler: IstioHandler;
-  instance: IstioInstance;
-  quotaSpec: QuotaSpec;
-  quotaSpecBinding: QuotaSpecBinding;
-  attributeManifest: AttributeManifest;
-  httpApiSpec: HTTPAPISpec;
-  httpApiSpecBinding: HTTPAPISpecBinding;
-  policy: Policy;
-  meshPolicy: Policy;
-  serviceMeshPolicy: Policy;
-  clusterRbacConfig: ClusterRbacConfig;
-  rbacConfig: RbacConfig;
   authorizationPolicy: AuthorizationPolicy;
-  serviceMeshRbacConfig: ServiceMeshRbacConfig;
-  serviceRole: ServiceRole;
-  serviceRoleBinding: ServiceRoleBinding;
   peerAuthentication: PeerAuthentication;
   requestAuthentication: RequestAuthentication;
   permissions: ResourcePermissions;

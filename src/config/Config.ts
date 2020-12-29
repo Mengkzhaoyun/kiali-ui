@@ -16,6 +16,10 @@ const conf = {
     defaultDuration: 1 * UNIT_TIME.MINUTE,
     /** By default refresh is 15 seconds */
     defaultRefreshInterval: 15 * MILLISECONDS,
+    /** Time Range default in 10 minutes **/
+    defaultTimeRange: {
+      rangeDuration: 10 * UNIT_TIME.MINUTE
+    },
     /** Options in refresh */
     refreshInterval: {
       0: 'Pause',
@@ -111,6 +115,8 @@ const conf = {
       appMetrics: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/metrics`,
       appDashboard: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/dashboard`,
       appSpans: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/spans`,
+      serviceSpans: (namespace: string, service: string) => `api/namespaces/${namespace}/services/${service}/spans`,
+      workloadSpans: (namespace: string, workload: string) => `api/namespaces/${namespace}/workloads/${workload}/spans`,
       customDashboard: (namespace: string, template: string) =>
         `api/namespaces/${namespace}/customdashboard/${template}`,
       grafana: 'api/grafana',
@@ -123,14 +129,19 @@ const conf = {
       iter8Experiments: `api/iter8/experiments`,
       iter8ExperimentsByNamespace: (namespace: string) => `api/iter8/namespaces/${namespace}/experiments`,
       iter8Experiment: (namespace: string, name: string) => `api/iter8/namespaces/${namespace}/experiments/${name}`,
+      iter8ExperimentYAML: (namespace: string, name: string) =>
+        `api/iter8/namespaces/${namespace}/experiments/${name}/yaml`,
       iter8ExperimentUpdate: (namespace: string, name: string) =>
         `api/iter8/namespaces/${namespace}/experiments/${name}`,
       istioPermissions: 'api/istio/permissions',
       jaeger: 'api/jaeger',
-      jaegerTraces: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/traces`,
+      appTraces: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/traces`,
+      serviceTraces: (namespace: string, svc: string) => `api/namespaces/${namespace}/services/${svc}/traces`,
+      workloadTraces: (namespace: string, wkd: string) => `api/namespaces/${namespace}/workloads/${wkd}/traces`,
       jaegerErrorTraces: (namespace: string, app: string) => `api/namespaces/${namespace}/apps/${app}/errortraces`,
       jaegerTrace: (idTrace: string) => `api/traces/${idTrace}`,
       logout: 'api/logout',
+      metricsStats: 'api/stats/metrics',
       namespaces: 'api/namespaces',
       namespace: (namespace: string) => `api/namespaces/${namespace}`,
       namespacesGraphElements: `api/namespaces/graph`,
@@ -142,6 +153,9 @@ const conf = {
       istioStatus: () => 'api/istio/status',
       pod: (namespace: string, pod: string) => `api/namespaces/${namespace}/pods/${pod}`,
       podLogs: (namespace: string, pod: string) => `api/namespaces/${namespace}/pods/${pod}/logs`,
+      podEnvoyProxy: (namespace: string, pod: string) => `api/namespaces/${namespace}/pods/${pod}/config_dump`,
+      podEnvoyProxyResourceEntries: (namespace: string, pod: string, resource: string) =>
+        `api/namespaces/${namespace}/pods/${pod}/config_dump/${resource}`,
       serverConfig: `api/config`,
       services: (namespace: string) => `api/namespaces/${namespace}/services`,
       service: (namespace: string, service: string) => `api/namespaces/${namespace}/services/${service}`,
@@ -152,12 +166,6 @@ const conf = {
       serviceDashboard: (namespace: string, service: string) =>
         `api/namespaces/${namespace}/services/${service}/dashboard`,
       status: 'api/status',
-      threeScale: 'api/threescale',
-      threeScaleHandler: (handlerName: string) => `api/threescale/handlers/${handlerName}`,
-      threeScaleHandlers: 'api/threescale/handlers',
-      threeScaleServiceRule: (namespace: string, service: string) =>
-        `api/threescale/namespaces/${namespace}/services/${service}`,
-      threeScaleServiceRules: (namespace: string) => `api/threescale/namespaces/${namespace}/services`,
       workloads: (namespace: string) => `api/namespaces/${namespace}/workloads`,
       workload: (namespace: string, workload: string) => `api/namespaces/${namespace}/workloads/${workload}`,
       workloadGraphElements: (namespace: string, workload: string) =>

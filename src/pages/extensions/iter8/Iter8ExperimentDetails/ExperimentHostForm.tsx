@@ -24,7 +24,7 @@ type Props = {
   hosts: Host[];
   hostsOfGateway: Host[];
   gateways: string[];
-  onAdd: (criteria: Criteria, host: Host) => void;
+  onAdd: (criteria: Criteria, host: Host, match: any) => void;
   onRemove: (type: string, index: number) => void;
 };
 
@@ -57,7 +57,7 @@ class ExperimentHostForm extends React.Component<Props, HostState> {
     const removeAction = {
       title: 'Remove Host',
       // @ts-ignore
-      onClick: (event, rowIndex, rowData, extraData) => {
+      onClick: (event, rowIndex) => {
         this.props.onRemove('Host', rowIndex);
       }
     };
@@ -98,7 +98,7 @@ class ExperimentHostForm extends React.Component<Props, HostState> {
   };
 
   onAddHost = () => {
-    this.props.onAdd(initCriteria(), this.state.addHost);
+    this.props.onAdd(initCriteria(), this.state.addHost, null);
     this.setState({
       addHost: {
         name: '',

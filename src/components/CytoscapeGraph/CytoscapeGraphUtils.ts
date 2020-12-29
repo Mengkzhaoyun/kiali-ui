@@ -9,8 +9,10 @@ import { DagreGraph } from './graphs/DagreGraph';
 import * as Cy from 'cytoscape';
 
 export const CyEdge = {
+  destPrincipal: 'destPrincipal',
   grpc: 'grpc',
   grpcErr: 'grpcErr',
+  grpcNoResponse: 'grpcNoResponse',
   grpcPercentErr: 'grpcPercentErr',
   grpcPercentReq: 'grpcPercentReq',
   hasTraffic: 'hasTraffic',
@@ -18,6 +20,7 @@ export const CyEdge = {
   http3xx: 'http3xx',
   http4xx: 'http4xx',
   http5xx: 'http5xx',
+  httpNoResponse: 'httpNoResponse',
   httpPercentErr: 'httpPercentErr',
   httpPercentReq: 'httpPercentReq',
   id: 'id',
@@ -25,6 +28,7 @@ export const CyEdge = {
   protocol: 'protocol',
   responses: 'responses',
   responseTime: 'responseTime',
+  sourcePrincipal: 'sourcePrincipal',
   tcp: 'tcp'
 };
 
@@ -40,14 +44,18 @@ export const CyNode = {
   destServices: 'destServices',
   grpcIn: 'grpcIn',
   grpcInErr: 'grpcInErr',
+  grpcInNoResponse: 'grpcInNoResponse',
   grpcOut: 'grpcOut',
   hasCB: 'hasCB',
   hasMissingSC: 'hasMissingSC',
   hasVS: 'hasVS',
+  health: 'health',
+  healthStatus: 'healthStatus',
   httpIn: 'httpIn',
   httpIn3xx: 'httpIn3xx',
   httpIn4xx: 'httpIn4xx',
   httpIn5xx: 'httpIn5xx',
+  httpInNoResponse: 'httpInNoResponse',
   httpOut: 'httpOut',
   id: 'id',
   isDead: 'isDead',
@@ -79,6 +87,8 @@ export const safeFit = (cy: Cy.Core, centerElements?: Cy.Collection) => {
     cy.zoom(ZoomOptions.maxZoom);
     !!centerElements && !!centerElements.length ? cy.center(centerElements) : cy.center();
   }
+  // 'fit' is a custom event that we emit allowing us to reset cytoscapeGraph.customViewport
+  cy.emit('fit');
 };
 
 export const runLayout = (cy: Cy.Core, layout: Layout) => {

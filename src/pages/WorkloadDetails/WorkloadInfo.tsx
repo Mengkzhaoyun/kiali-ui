@@ -2,7 +2,7 @@ import * as React from 'react';
 import { style } from 'typestyle';
 import * as API from '../../services/Api';
 import * as AlertUtils from '../../utils/AlertUtils';
-import { IstioRule, ObjectCheck, Validations, ValidationTypes } from '../../types/IstioObjects';
+import { ObjectCheck, Validations, ValidationTypes } from '../../types/IstioObjects';
 import WorkloadDescription from './WorkloadInfo/WorkloadDescription';
 import WorkloadPods from './WorkloadInfo/WorkloadPods';
 import WorkloadServices from './WorkloadInfo/WorkloadServices';
@@ -15,18 +15,20 @@ import { RenderComponentScroll } from '../../components/Nav/Page';
 import Validation from '../../components/Validations/Validation';
 import ErrorBoundaryWithMessage from '../../components/ErrorBoundary/ErrorBoundaryWithMessage';
 import GraphDataSource from '../../services/GraphDataSource';
-import { DurationInSeconds } from 'types/Common';
-import { RightActionBar } from 'components/RightActionBar/RightActionBar';
-import { DurationDropdownContainer } from 'components/DurationDropdown/DurationDropdown';
-import RefreshButtonContainer from 'components/Refresh/RefreshButton';
-import WorkloadWizardDropdown from '../../components/IstioWizards/WorkloadWizardDropdown';
-import { serverConfig } from '../../config';
+import { DurationInSeconds, TimeInMilliseconds } from 'types/Common';
 import { isIstioNamespace } from '../../config/ServerConfig';
+import { IstioConfigList, toIstioItems } from '../../types/IstioConfigList';
+import IstioConfigSubList from '../../components/IstioConfigSubList/IstioConfigSubList';
+import { KialiAppState } from '../../store/Store';
+import { connect } from 'react-redux';
+import { durationSelector } from '../../store/Selectors';
 
 type WorkloadInfoProps = {
   namespace: string;
-  workloadName: string;
+  workload?: Workload;
   duration: DurationInSeconds;
+  lastRefreshAt: TimeInMilliseconds;
+  refreshWorkload: () => void;
 };
 
 interface ValidationChecks {
@@ -34,11 +36,10 @@ interface ValidationChecks {
 }
 
 type WorkloadInfoState = {
-  workload?: Workload;
   validations?: Validations;
   currentTab: string;
   health?: WorkloadHealth;
-  threescaleRules: IstioRule[];
+  workloadIstioConfig?: IstioConfigList;
 };
 
 const tabIconStyle = style({
@@ -49,8 +50,18 @@ const tabName = 'list';
 const defaultTab = 'pods';
 const paramToTab: { [key: string]: number } = {
   pods: 0,
-  services: 1
+  services: 1,
+  istioconfig: 2
 };
+
+const workloadIstioResources = [
+  'gateways',
+  'authorizationpolicies',
+  'peerauthentications',
+  'sidecars',
+  'requestauthentications',
+  'envoyfilters'
+];
 
 class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState> {
   private graphDataSource = new GraphDataSource();
@@ -58,8 +69,7 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
   constructor(props: WorkloadInfoProps) {
     super(props);
     this.state = {
-      currentTab: activeTab(tabName, defaultTab),
-      threescaleRules: []
+      currentTab: activeTab(tabName, defaultTab)
     };
   }
 
@@ -68,49 +78,42 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
   }
 
   componentDidUpdate(prev: WorkloadInfoProps) {
-    const aTab = activeTab(tabName, defaultTab);
-
-    if (this.state.currentTab !== aTab) {
-      this.setState({
-        currentTab: aTab
-      });
-    }
-
-    if (prev.duration !== this.props.duration) {
+    // Fetch WorkloadInfo backend on duration changes or WorkloadDetailsPage update
+    if (
+      prev.duration !== this.props.duration ||
+      prev.lastRefreshAt !== this.props.lastRefreshAt ||
+      prev.workload !== this.props.workload
+    ) {
       this.fetchBackend();
     }
   }
 
   private fetchBackend = () => {
-    this.graphDataSource.fetchForWorkload(this.props.duration, this.props.namespace, this.props.workloadName);
-    API.getWorkload(this.props.namespace, this.props.workloadName)
-      .then(details =>
-        this.setState({
-          workload: details.data,
-          validations: this.workloadValidations(details.data)
-        })
+    if (this.props.workload) {
+      this.graphDataSource.fetchForWorkload(this.props.duration, this.props.namespace, this.props.workload.name);
+      this.setState({
+        validations: this.workloadValidations(this.props.workload)
+      });
+      API.getWorkloadHealth(
+        this.props.namespace,
+        this.props.workload.name,
+        this.props.workload ? this.props.workload.type : '',
+        this.props.duration,
+        this.props.workload ? this.props.workload.istioSidecar : false
       )
-      .catch(error => AlertUtils.addError('Could not fetch Workload.', error));
-    API.getWorkloadHealth(
-      this.props.namespace,
-      this.props.workloadName,
-      this.state.workload ? this.state.workload.type : '',
-      this.props.duration,
-      this.state.workload ? this.state.workload.istioSidecar : false
-    )
-      .then(health => this.setState({ health: health }))
-      .catch(error => AlertUtils.addError('Could not fetch Health.', error));
-    if (serverConfig.extensions?.threescale.enabled) {
-      // 3scale info should be placed under control plane namespace
-      API.getIstioConfig(serverConfig.istioNamespace, ['rules'], false, 'kiali_wizard=threescale')
-        .then(response => {
-          this.setState({
-            threescaleRules: response.data.rules
-          });
-        })
-        .catch(error => {
-          AlertUtils.addError('Could not fetch 3scale Rules.', error);
-        });
+        .then(health => this.setState({ health: health }))
+        .catch(error => AlertUtils.addError('Could not fetch Health.', error));
+
+      const labels = this.props.workload.labels;
+      const wkLabels: string[] = [];
+      Object.keys(labels).forEach(key => {
+        const label = key + (labels[key] ? '=' + labels[key] : '');
+        wkLabels.push(label);
+      });
+      const workloadSelector = wkLabels.join(',');
+      API.getIstioConfig(this.props.namespace, workloadIstioResources, true, '', workloadSelector)
+        .then(response => this.setState({ workloadIstioConfig: response.data }))
+        .catch(error => AlertUtils.addError('Could not fetch Istio Config.', error));
     }
   };
 
@@ -181,7 +184,7 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
       hasPodsChecks: false
     };
 
-    const pods = this.state.workload?.pods || [];
+    const pods = this.props.workload?.pods || [];
 
     validationChecks.hasPodsChecks = pods.some(
       pod =>
@@ -198,7 +201,7 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
   }
 
   render() {
-    const workload = this.state.workload;
+    const workload = this.props.workload;
     const pods = workload?.pods || [];
     const services = workload?.services || [];
     const validationChecks = this.validationChecks();
@@ -210,7 +213,30 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
       </span>
     );
 
-    const getValidationIcon = (keys: string[], type: string) => {
+    const getIstioValidationIcon = (typeNames: { [key: string]: string[] }) => {
+      let severity = ValidationTypes.Correct;
+      if (this.state.workloadIstioConfig && this.state.workloadIstioConfig.validations) {
+        const istioValidations = this.state.workloadIstioConfig.validations;
+        Object.keys(istioValidations).forEach(type => {
+          const typeValidations = istioValidations[type];
+          Object.keys(typeValidations).forEach(name => {
+            const nameValidation = typeValidations[name];
+            if (typeNames[type] && typeNames[type].includes(name)) {
+              const itemSeverity = validationToSeverity(nameValidation);
+              if (
+                (itemSeverity === ValidationTypes.Warning && severity !== ValidationTypes.Error) ||
+                itemSeverity === ValidationTypes.Error
+              ) {
+                severity = itemSeverity;
+              }
+            }
+          });
+        });
+      }
+      return severity !== ValidationTypes.Correct ? getSeverityIcon(severity) : undefined;
+    };
+
+    const getWorkloadValidationIcon = (keys: string[], type: string) => {
       let severity = ValidationTypes.Warning;
       keys.forEach(key => {
         const validations = this.state.validations![type][key];
@@ -225,7 +251,7 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
       <>
         Pods ({pods.length}){' '}
         {validationChecks.hasPodsChecks
-          ? getValidationIcon(
+          ? getWorkloadValidationIcon(
               pods.map(a => a.name),
               'pod'
             )
@@ -233,22 +259,39 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
       </>
     );
 
+    const istioConfigItems = this.state.workloadIstioConfig ? toIstioItems(this.state.workloadIstioConfig) : [];
+    let istioTabTitle: JSX.Element | undefined;
+    let istioConfigIcon = undefined;
+    // Helper to iterate at same time on workloadIstioConfig resources and validations
+    const wkIstioTypes = [
+      { field: 'gateways', validation: 'gateway' },
+      { field: 'sidecars', validation: 'sidecar' },
+      { field: 'envoyFilters', validation: 'envoyfilter' },
+      { field: 'requestAuthentications', validation: 'requestauthentication' },
+      { field: 'authorizationPolicies', validation: 'authorizationpolicy' },
+      { field: 'peerAuthentications', validation: 'peerauthentication' }
+    ];
+    if (this.state.workloadIstioConfig?.validations) {
+      const typeNames: { [key: string]: string[] } = {};
+      wkIstioTypes.forEach(wkIstioType => {
+        if (this.state.workloadIstioConfig && this.state.workloadIstioConfig.validations[wkIstioType.validation]) {
+          typeNames[wkIstioType.validation] = [];
+          this.state.workloadIstioConfig[wkIstioType.field]?.forEach(r =>
+            typeNames[wkIstioType.validation].push(r.metadata.name)
+          );
+        }
+      });
+      istioConfigIcon = getIstioValidationIcon(typeNames);
+    }
+    istioTabTitle = (
+      <>
+        Istio Config ({istioConfigItems.length}){istioConfigIcon}
+      </>
+    );
     return (
       <>
-        <RightActionBar>
-          <DurationDropdownContainer id="workload-info-duration-dropdown" prefix="Last" />
-          <RefreshButtonContainer handleRefresh={this.fetchBackend} />
-          {workload && (
-            <WorkloadWizardDropdown
-              namespace={this.props.namespace}
-              workload={workload}
-              rules={this.state.threescaleRules}
-              onChange={this.fetchBackend}
-            />
-          )}
-        </RightActionBar>
         <RenderComponentScroll>
-          <Grid style={{ margin: '10px' }} gutter={'md'}>
+          <Grid gutter={'md'}>
             <GridItem span={12}>
               <WorkloadDescription
                 workload={workload}
@@ -272,7 +315,7 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
                   <ErrorBoundaryWithMessage message={this.errorBoundaryMessage('Pods')}>
                     <WorkloadPods
                       namespace={this.props.namespace}
-                      workload={this.state.workload?.name || ''}
+                      workload={this.props.workload?.name || ''}
                       pods={pods}
                       validations={this.state.validations?.pod || {}}
                     />
@@ -282,9 +325,14 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
                   <ErrorBoundaryWithMessage message={this.errorBoundaryMessage('Services')}>
                     <WorkloadServices
                       services={services}
-                      workload={this.state.workload?.name || ''}
+                      workload={this.props.workload?.name || ''}
                       namespace={this.props.namespace}
                     />
+                  </ErrorBoundaryWithMessage>
+                </Tab>
+                <Tab title={istioTabTitle} eventKey={2}>
+                  <ErrorBoundaryWithMessage message={this.errorBoundaryMessage('Istio Config')}>
+                    <IstioConfigSubList name={this.props.workload?.name || ''} items={istioConfigItems} />
                   </ErrorBoundaryWithMessage>
                 </Tab>
               </ParameterizedTabs>
@@ -296,4 +344,10 @@ class WorkloadInfo extends React.Component<WorkloadInfoProps, WorkloadInfoState>
   }
 }
 
-export default WorkloadInfo;
+const mapStateToProps = (state: KialiAppState) => ({
+  duration: durationSelector(state),
+  lastRefreshAt: state.globalState.lastRefreshAt
+});
+
+const WorkloadInfoContainer = connect(mapStateToProps)(WorkloadInfo);
+export default WorkloadInfoContainer;

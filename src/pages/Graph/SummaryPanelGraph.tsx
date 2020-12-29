@@ -17,7 +17,7 @@ import {
   hr
 } from './SummaryPanelCommon';
 import { Response } from '../../services/Api';
-import { Metrics, Datapoint } from '../../types/Metrics';
+import { IstioMetricsMap, Datapoint } from '../../types/Metrics';
 import { IstioMetricsOptions } from '../../types/MetricsOptions';
 import { CancelablePromise, makeCancelablePromise, PromisesRegistry } from '../../utils/CancelablePromises';
 import { CyNode } from '../../components/CytoscapeGraph/CytoscapeGraphUtils';
@@ -78,7 +78,7 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
     width: '25em'
   };
 
-  private metricsPromise?: CancelablePromise<Response<Metrics>>;
+  private metricsPromise?: CancelablePromise<Response<IstioMetricsMap>>;
   private validationSummaryPromises: PromisesRegistry = new PromisesRegistry();
 
   constructor(props: SummaryPanelPropType) {
@@ -157,7 +157,8 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                   <RateTableGrpc
                     title="GRPC Traffic (requests per second):"
                     rate={incomingRateGrpc.rate}
-                    rateErr={incomingRateGrpc.rateErr}
+                    rateGrpcErr={incomingRateGrpc.rateGrpcErr}
+                    rateNR={incomingRateGrpc.rateNoResponse}
                   />
                 )}
                 {incomingRateHttp.rate > 0 && (
@@ -167,6 +168,7 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                     rate3xx={incomingRateHttp.rate3xx}
                     rate4xx={incomingRateHttp.rate4xx}
                     rate5xx={incomingRateHttp.rate5xx}
+                    rateNR={incomingRateHttp.rateNoResponse}
                   />
                 )}
                 {
@@ -186,7 +188,8 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                   <RateTableGrpc
                     title="GRPC Traffic (requests per second):"
                     rate={outgoingRateGrpc.rate}
-                    rateErr={outgoingRateGrpc.rateErr}
+                    rateGrpcErr={outgoingRateGrpc.rateGrpcErr}
+                    rateNR={outgoingRateGrpc.rateNoResponse}
                   />
                 )}
                 {outgoingRateHttp.rate > 0 && (
@@ -196,6 +199,7 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                     rate3xx={outgoingRateHttp.rate3xx}
                     rate4xx={outgoingRateHttp.rate4xx}
                     rate5xx={outgoingRateHttp.rate5xx}
+                    rateNR={outgoingRateHttp.rateNoResponse}
                   />
                 )}
                 {
@@ -215,7 +219,8 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                   <RateTableGrpc
                     title="GRPC Traffic (requests per second):"
                     rate={totalRateGrpc.rate}
-                    rateErr={totalRateGrpc.rateErr}
+                    rateGrpcErr={totalRateGrpc.rateGrpcErr}
+                    rateNR={totalRateGrpc.rateNoResponse}
                   />
                 )}
                 {totalRateHttp.rate > 0 && (
@@ -225,6 +230,7 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
                     rate3xx={totalRateHttp.rate3xx}
                     rate4xx={totalRateHttp.rate4xx}
                     rate5xx={totalRateHttp.rate5xx}
+                    rateNR={totalRateHttp.rateNoResponse}
                   />
                 )}
                 {this.shouldShowRPSChart() && (
@@ -387,10 +393,10 @@ export default class SummaryPanelGraph extends React.Component<SummaryPanelPropT
       .then(response => {
         this.setState({
           loading: false,
-          reqRates: getFirstDatapoints(response.data.metrics.request_count),
-          errRates: getFirstDatapoints(response.data.metrics.request_error_count),
-          tcpSent: getFirstDatapoints(response.data.metrics.tcp_sent),
-          tcpReceived: getFirstDatapoints(response.data.metrics.tcp_received)
+          reqRates: getFirstDatapoints(response.data.request_count),
+          errRates: getFirstDatapoints(response.data.request_error_count),
+          tcpSent: getFirstDatapoints(response.data.tcp_sent),
+          tcpReceived: getFirstDatapoints(response.data.tcp_received)
         });
       })
       .catch(error => {

@@ -1,6 +1,8 @@
 import Namespace from './Namespace';
 import { ResourcePermissions } from './Permissions';
 import { ServicePort } from './ServiceInfo';
+import { ProxyStatus } from './Health';
+import { TimeInSeconds } from './Common';
 
 // Common types
 
@@ -42,6 +44,19 @@ export interface IstioObject {
   kind?: string;
   apiVersion?: string;
   metadata: K8sMetadata;
+  status?: IstioStatus;
+}
+
+export interface IstioStatus {
+  validationMessages?: ValidationMessage[];
+  conditions?: any[];
+}
+
+export interface ValidationMessage {
+  code: string;
+  documentation_url: string;
+  level: string;
+  message: string;
 }
 
 // validations are grouped per 'objectType' first in the first map and 'name' in the inner map
@@ -50,7 +65,8 @@ export type Validations = { [key1: string]: { [key2: string]: ObjectValidation }
 export enum ValidationTypes {
   Error = 'error',
   Warning = 'warning',
-  Correct = 'correct'
+  Correct = 'correct',
+  Info = 'info'
 }
 
 export interface ObjectValidation {
@@ -105,14 +121,61 @@ export interface Pod {
   istioContainers?: ContainerInfo[];
   istioInitContainers?: ContainerInfo[];
   status: string;
+  statusMessage?: string;
+  statusReason?: string;
   appLabel: boolean;
   versionLabel: boolean;
+  proxyStatus?: ProxyStatus;
 }
 
-export type Logs = string;
+export type LogEntry = {
+  message: string;
+  severity: string;
+  timestamp: string;
+  timestampUnix: TimeInSeconds;
+};
 
 export interface PodLogs {
-  logs?: Logs;
+  entries: LogEntry[];
+}
+
+export interface EnvoyProxyDump {
+  configDump?: EnvoyConfigDump;
+  bootstrap?: BootstrapSummary;
+  clusters?: ClusterSummary[];
+  listeners?: ListenerSummary[];
+  routes?: RouteSummary[];
+}
+
+export interface EnvoyConfigDump {
+  configs: any[];
+}
+
+export interface ClusterSummary {
+  service_fqdn: string;
+  port: number;
+  subset: string;
+  direction: string;
+  type: number;
+  destination_rule: string;
+}
+
+export interface ListenerSummary {
+  address: string;
+  port: number;
+  match: string;
+  destination: string;
+}
+
+export interface RouteSummary {
+  name: string;
+  domains: string;
+  match: string;
+  virtual_service: string;
+}
+
+export interface BootstrapSummary {
+  bootstrap: any;
 }
 
 export interface Service {
@@ -315,7 +378,7 @@ export interface ConnectionPoolSettingsHTTPSettings {
   http2MaxRequests?: number;
   maxRequestsPerConnection?: number;
   maxRetries?: number;
-  idleTimeout?: number;
+  idleTimeout?: string;
   h2UpgradePolicy?: string;
 }
 
@@ -599,70 +662,8 @@ export interface Endpoint {
   labels: { [key: string]: string };
 }
 
-export interface IstioRuleSpec {
-  match: string;
-  actions: IstioRuleActionItem[];
-}
-
-export interface IstioRule extends IstioObject {
-  spec: IstioRuleSpec;
-}
-
-export interface IstioRuleActionItem {
-  handler: string;
-  instances: string[];
-}
-
-export interface IstioAdapter extends IstioObject {
-  spec: any;
-}
-
-export interface IstioTemplate extends IstioObject {
-  spec: any;
-}
-
-export interface IstioHandler extends IstioObject {
-  spec: any;
-}
-
-export interface IstioInstance extends IstioObject {
-  spec: any;
-}
-
-export interface QuotaSpecSpec {
-  rules?: MatchQuota[];
-}
-
-export interface QuotaSpec extends IstioObject {
-  spec: QuotaSpecSpec;
-}
-
-export interface MatchQuota {
-  match?: Match;
-  quotas?: Quota;
-}
-
 export interface Match {
   clause: { [attributeName: string]: { [matchType: string]: string } };
-}
-
-export interface Quota {
-  quota: string;
-  charge: number;
-}
-
-export interface QuotaSpecBindingSpec {
-  quotaSpecs?: QuotaSpecRef[];
-  services?: IstioService[];
-}
-
-export interface QuotaSpecBinding extends IstioObject {
-  spec: QuotaSpecBindingSpec;
-}
-
-export interface QuotaSpecRef {
-  name: string;
-  namespace?: string;
 }
 
 export interface TargetSelector {
@@ -699,53 +700,6 @@ export interface OriginAuthenticationMethod {
 export enum PrincipalBinding {
   USE_PEER = 'USE_PEER',
   USE_ORIGIN = 'USE_ORIGIN'
-}
-
-export interface PolicySpec {
-  targets?: TargetSelector[];
-  peers?: PeerAuthenticationMethod[];
-  peerIsOptional?: boolean;
-  origins?: OriginAuthenticationMethod[];
-  originIsOptional?: boolean;
-  principalBinding?: PrincipalBinding;
-}
-
-export interface Policy extends IstioObject {
-  spec: PolicySpec;
-}
-
-export interface ClusterRbacConfig extends IstioObject {
-  spec: ClusterRbacConfigSpec;
-}
-
-export interface ServiceMeshRbacConfig extends IstioObject {
-  spec: ClusterRbacConfigSpec;
-}
-
-export interface ClusterRbacConfigSpec {
-  mode?: string;
-  inclusion?: ClusterRbacConfigTarget;
-  exclusion?: ClusterRbacConfigTarget;
-}
-
-export interface ClusterRbacConfigTarget {
-  services: string[];
-  namespaces: string[];
-}
-
-export interface RbacConfig extends IstioObject {
-  spec: RbacConfigSpec;
-}
-
-export interface RbacConfigSpec {
-  mode?: string;
-  inclusion?: RbacConfigTarget;
-  exclusion?: RbacConfigTarget;
-}
-
-export interface RbacConfigTarget {
-  services: string[];
-  namespaces: string[];
 }
 
 export interface AuthorizationPolicy extends IstioObject {
@@ -802,40 +756,6 @@ export interface Condition {
   key: string;
   values?: string[];
   notValues?: string[];
-}
-
-export interface ServiceRole extends IstioObject {
-  spec: ServiceRoleSpec;
-}
-
-export interface ServiceRoleSpec {
-  rules?: AccessRules[];
-}
-
-export interface AccessRules {
-  service: string[];
-  path: string[];
-  methods: string[];
-  constraints: AccessRuleConstraint;
-}
-
-export interface AccessRuleConstraint {
-  key: string;
-  values: string[];
-}
-
-export interface ServiceRoleBinding extends IstioObject {
-  spec: ServiceRoleBindingSpec;
-}
-
-export interface ServiceRoleBindingSpec {
-  subjects?: ServiceRoleBindingSubject[];
-  roleRef?: Reference;
-}
-
-export interface ServiceRoleBindingSubject {
-  user: string;
-  properties: { [key: string]: string };
 }
 
 export interface PeerAuthentication extends IstioObject {
@@ -994,58 +914,8 @@ export interface AttributeInfo {
   valueType: string;
 }
 
-export interface AttributeManifestSpec {
-  revision?: string;
-  name: string;
-  attributes?: { [key: string]: AttributeInfo };
-}
-
-export interface AttributeManifest extends IstioObject {
-  spec: AttributeManifestSpec;
-}
-
-export interface HTTPAPISpecPattern {
-  attributes?: { [key: string]: { [key: string]: string } };
-  httpMethod?: string;
-  uriTemplate?: string;
-  regex?: string;
-}
-
 export interface APIKey {
   query?: string;
   header?: string;
   cookie?: string;
-}
-
-// Attribute Value is mapped as an inner map of string
-export interface HTTPAPISpecSpec {
-  attributes?: { [key: string]: { [key: string]: string } };
-  patterns?: HTTPAPISpecPattern[];
-  apiKeys?: APIKey[];
-}
-
-export interface HTTPAPISpec extends IstioObject {
-  spec: HTTPAPISpecSpec;
-}
-
-export interface IstioService {
-  name?: string;
-  namespace?: string;
-  domain?: string;
-  service?: string;
-  labels?: { [key: string]: string };
-}
-
-export interface HTTPAPISpecReference {
-  name: string;
-  namespace?: string;
-}
-
-export interface HTTPAPISpecBindingSpec {
-  services: IstioService[];
-  apiSpecs: HTTPAPISpecReference[];
-}
-
-export interface HTTPAPISpecBinding extends IstioObject {
-  spec: HTTPAPISpecBindingSpec;
 }

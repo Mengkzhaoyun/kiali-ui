@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { NodeType, GraphNodeData } from '../../types/Graph';
+import { NodeType, GraphNodeData, DestService } from '../../types/Graph';
 import { CyNode, decoratedNodeData } from '../../components/CytoscapeGraph/CytoscapeGraphUtils';
 import { KialiIcon } from 'config/KialiIcon';
 import { Tooltip, Badge, PopoverPosition, TooltipPosition } from '@patternfly/react-core';
@@ -154,7 +154,7 @@ export const renderHealth = (health?: Health) => {
   return (
     <>
       <Badge style={{ fontWeight: 'normal', marginTop: '4px', marginBottom: '4px' }} isRead={true}>
-        <span style={{ margin: '3px 0 1px 0' }}>
+        <span style={{ margin: '3px 3px 1px 0' }}>
           {health ? (
             <HealthIndicator
               id="graph-health-indicator"
@@ -166,7 +166,7 @@ export const renderHealth = (health?: Health) => {
             'n/a'
           )}
         </span>
-        <span style={{ marginLeft: '4px' }}>health</span>
+        health
       </Badge>
     </>
   );
@@ -174,7 +174,7 @@ export const renderHealth = (health?: Health) => {
 
 export const renderDestServicesLinks = (node: any) => {
   const nodeData = decoratedNodeData(node);
-  const destServices = node.data(CyNode.destServices);
+  const destServices: DestService[] = node.data(CyNode.destServices);
 
   const links: any[] = [];
   if (!destServices) {

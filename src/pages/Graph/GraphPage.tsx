@@ -147,7 +147,7 @@ const cytoscapeGraphContainerStyle = style({ flex: '1', minWidth: '350px', zInde
 const cytoscapeGraphWrapperDivStyle = style({ position: 'relative', backgroundColor: PfColors.GrayBackground });
 const cytoscapeToolbarWrapperDivStyle = style({
   position: 'absolute',
-  bottom: '10px',
+  bottom: '5px',
   zIndex: 2,
   borderStyle: 'hidden'
 });
@@ -265,7 +265,7 @@ export class GraphPage extends React.Component<GraphPageProps, GraphPageState> {
       props.setNode(urlNode);
     }
     const urlTrace = getTraceId();
-    if (urlTrace !== props.trace) {
+    if (urlTrace !== props.trace?.traceID) {
       props.setTraceId(urlTrace);
     }
 
@@ -279,6 +279,7 @@ export class GraphPage extends React.Component<GraphPageProps, GraphPageState> {
           namespaces: props.node ? [props.node.namespace] : props.activeNamespaces,
           duration: props.duration,
           graphType: props.graphType,
+          includeHealth: true,
           injectServiceNodes: props.showServiceNodes,
           edgeLabelMode: props.edgeLabelMode,
           showOperationNodes: props.showOperationNodes,
@@ -639,6 +640,7 @@ export class GraphPage extends React.Component<GraphPageProps, GraphPageState> {
       namespaces: this.props.node ? [this.props.node.namespace] : this.props.activeNamespaces,
       duration: this.props.duration,
       graphType: this.props.graphType,
+      includeHealth: true,
       injectServiceNodes: this.props.showServiceNodes,
       edgeLabelMode: this.props.edgeLabelMode,
       showOperationNodes: this.props.showOperationNodes,

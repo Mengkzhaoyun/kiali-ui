@@ -6,7 +6,6 @@ import { getAccumulatedTrafficRateGrpc, getAccumulatedTrafficRateHttp } from '..
 import { renderBadgedLink, renderHealth } from './SummaryLink';
 import {
   shouldRefreshData,
-  updateHealth,
   getFirstDatapoints,
   getNodeMetrics,
   getNodeMetricType,
@@ -15,14 +14,13 @@ import {
   hr,
   summaryPanel
 } from './SummaryPanelCommon';
-import { Health } from '../../types/Health';
 import { Response } from '../../services/Api';
-import { Metrics, Datapoint } from '../../types/Metrics';
+import { IstioMetricsMap, Datapoint } from '../../types/Metrics';
 import { Reporter } from '../../types/MetricsOptions';
 import { CancelablePromise, makeCancelablePromise } from '../../utils/CancelablePromises';
 import { KialiIcon } from 'config/KialiIcon';
 import { decoratedNodeData, CyNode } from 'components/CytoscapeGraph/CytoscapeGraphUtils';
-import { Dropdown, DropdownPosition, DropdownItem, KebabToggle } from '@patternfly/react-core';
+import { Dropdown, DropdownPosition, DropdownItem, KebabToggle, DropdownGroup } from '@patternfly/react-core';
 import { getOptions, clickHandler } from 'components/CytoscapeGraph/ContextMenu/NodeContextMenu';
 
 type SummaryPanelGroupMetricsState = {
@@ -40,8 +38,6 @@ type SummaryPanelGroupState = SummaryPanelGroupMetricsState & {
   group: any;
   isOpen: boolean;
   loading: boolean;
-  healthLoading: boolean;
-  health?: Health;
   metricsLoadError: string | null;
 };
 
@@ -60,13 +56,12 @@ const defaultState: SummaryPanelGroupState = {
   group: null,
   isOpen: false,
   loading: false,
-  healthLoading: false,
   metricsLoadError: null,
   ...defaultMetricsState
 };
 
 export default class SummaryPanelGroup extends React.Component<SummaryPanelPropType, SummaryPanelGroupState> {
-  private metricsPromise?: CancelablePromise<Response<Metrics>[]>;
+  private metricsPromise?: CancelablePromise<Response<IstioMetricsMap>[]>;
   private readonly mainDivRef: React.RefObject<HTMLDivElement>;
 
   constructor(props: SummaryPanelPropType) {
@@ -86,7 +81,6 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
 
   componentDidMount() {
     this.updateRpsCharts(this.props);
-    updateHealth(this.props.data.summaryTarget, this.setState.bind(this));
   }
 
   componentDidUpdate(prevProps: SummaryPanelPropType) {
@@ -97,7 +91,6 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
     }
     if (shouldRefreshData(prevProps, this.props)) {
       this.updateRpsCharts(this.props);
-      updateHealth(this.props.data.summaryTarget, this.setState.bind(this));
     }
   }
 
@@ -113,13 +106,19 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
     const serviceList = this.renderServiceList(group);
     const workloadList = this.renderWorkloadList(group);
 
-    const actions = getOptions(nodeData).map(o => {
-      return (
-        <DropdownItem key={o.text} onClick={() => clickHandler(o)}>
-          {o.text}
-        </DropdownItem>
-      );
-    });
+    const actions = [
+      <DropdownGroup
+        label="Show"
+        className="kiali-group-menu"
+        children={getOptions(nodeData).map(o => {
+          return (
+            <DropdownItem key={o.text} onClick={() => clickHandler(o)}>
+              {o.text}
+            </DropdownItem>
+          );
+        })}
+      />
+    ];
 
     return (
       <div ref={this.mainDivRef} className={`panel panel-default ${summaryPanel}`}>
@@ -134,9 +133,10 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
               isOpen={this.state.isOpen}
               position={DropdownPosition.right}
               toggle={<KebabToggle id="summary-group-kebab" onToggle={this.onToggleActions} />}
+              isGrouped={true}
             />
           </div>
-          <div>{renderHealth(this.state.health)}</div>
+          <div>{renderHealth(nodeData.health)}</div>
           <div>
             {this.renderBadgeSummary(group)}
             {serviceList.length > 0 && <div>{serviceList}</div>}
@@ -195,9 +195,9 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
     this.metricsPromise = makeCancelablePromise(Promise.all([promiseOut, promiseIn]));
 
     this.metricsPromise.promise
-      .then((responses: Response<Metrics>[]) => {
-        const metricsOut = responses[0].data.metrics;
-        const metricsIn = responses[1].data.metrics;
+      .then((responses: Response<IstioMetricsMap>[]) => {
+        const metricsOut = responses[0].data;
+        const metricsIn = responses[1].data;
         this.setState({
           loading: false,
           requestCountIn: getFirstDatapoints(metricsIn.request_count),
@@ -269,9 +269,11 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
         <InOutRateTableGrpc
           title="GRPC Traffic (requests per second):"
           inRate={incoming.rate}
-          inRateErr={incoming.rateErr}
+          inRateGrpcErr={incoming.rateGrpcErr}
+          inRateNR={incoming.rateNoResponse}
           outRate={outgoing.rate}
-          outRateErr={outgoing.rateErr}
+          outRateGrpcErr={outgoing.rateGrpcErr}
+          outRateNR={outgoing.rateNoResponse}
         />
       </>
     );
@@ -293,10 +295,12 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
           inRate3xx={incoming.rate3xx}
           inRate4xx={incoming.rate4xx}
           inRate5xx={incoming.rate5xx}
+          inRateNR={incoming.rateNoResponse}
           outRate={outgoing.rate}
           outRate3xx={outgoing.rate3xx}
           outRate4xx={outgoing.rate4xx}
           outRate5xx={outgoing.rate5xx}
+          outRateNR={outgoing.rateNoResponse}
         />
       </>
     );
@@ -368,7 +372,6 @@ export default class SummaryPanelGroup extends React.Component<SummaryPanelPropT
     group.children(`node[nodeType = "${NodeType.SERVICE}"]`).forEach(serviceNode => {
       const serviceNodeData = decoratedNodeData(serviceNode);
       serviceList.push(renderBadgedLink(serviceNodeData, NodeType.SERVICE));
-      console.log(`service=[${serviceNodeData.service}]`);
       const aggregates = group.children(
         `node[nodeType = "${NodeType.AGGREGATE}"][service = "${serviceNodeData.service}"]`
       );

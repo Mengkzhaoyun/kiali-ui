@@ -17,6 +17,8 @@ import { style } from 'typestyle';
 import TourStopContainer from 'components/Tour/TourStop';
 import { GraphTourStops } from 'pages/Graph/GraphHelpTour';
 import { TimeInMilliseconds } from 'types/Common';
+import { AutoComplete } from 'utils/AutoComplete';
+import { HEALTHY } from 'types/Health';
 
 type ReduxProps = {
   compressOnHide: boolean;
@@ -63,13 +65,51 @@ const thinGroupStyle = style({
   paddingRight: '10px'
 });
 
+const operands: string[] = [
+  '%grpcerr',
+  '%grpctraffic',
+  '%httperr',
+  '%httptraffic',
+  'app',
+  'circuitbreaker',
+  'grpc',
+  'grpcerr',
+  'grpcin',
+  'grpcout',
+  'healthy',
+  'http',
+  'httpin',
+  'httpout',
+  'mtls',
+  'name',
+  'namespace',
+  'node',
+  'operation',
+  'outside',
+  'protocol',
+  'responsetime',
+  'service',
+  'serviceentry',
+  'sidecar',
+  'tcp',
+  'traffic',
+  'trafficsource',
+  'unused',
+  'version',
+  'tcpin',
+  'tcpout',
+  'workload'
+];
+
 export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
   static contextTypes = {
     router: () => null
   };
 
+  private findAutoComplete: AutoComplete;
   private findInputRef;
   private hiddenElements: any | undefined;
+  private hideAutoComplete: AutoComplete;
   private hideInputRef;
   private removedElements: any | undefined;
 
@@ -77,6 +117,8 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     super(props);
     const findValue = props.findValue ? props.findValue : '';
     const hideValue = props.hideValue ? props.hideValue : '';
+    this.findAutoComplete = new AutoComplete(operands);
+    this.hideAutoComplete = new AutoComplete(operands);
     this.state = { findInputValue: findValue, hideInputValue: hideValue };
     if (props.showFindHelp) {
       props.toggleFindHelp();
@@ -127,8 +169,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
 
     if (hideChanged || (graphChanged && !!this.props.hideValue)) {
       const compressOnHideChanged = this.props.compressOnHide !== prevProps.compressOnHide;
-      const layoutChanged = this.props.layout !== prevProps.layout;
-      this.handleHide(this.props.cy, hideChanged, graphChanged, compressOnHideChanged, layoutChanged);
+      this.handleHide(this.props.cy, hideChanged, graphChanged, compressOnHideChanged);
     }
   }
 
@@ -149,7 +190,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
               isValid={!this.state.findError}
               onChange={this.updateFind}
               defaultValue={this.state.findInputValue}
-              onKeyPress={this.checkSubmitFind}
+              onKeyDownCapture={this.checkSpecialKeyFind}
               placeholder="Find..."
             />
             {this.props.findValue && (
@@ -171,7 +212,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
               type="text"
               onChange={this.updateHide}
               defaultValue={this.state.hideInputValue}
-              onKeyPress={this.checkSubmitHide}
+              onKeyDownCapture={this.checkSpecialKeyHide}
               placeholder="Hide..."
             />
             {this.props.hideValue && (
@@ -211,8 +252,9 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
       this.clearFind();
     } else {
       const diff = Math.abs(val.length - this.state.findInputValue.length);
+      this.findAutoComplete.setInput(val, [' ', '!']);
       this.setState({ findInputValue: val, findError: undefined });
-      // assume autocomplete or paste if length change is greater than a single key, so submit
+      // submit if length change is greater than a single key, assume browser suggestion clicked or user paste
       if (diff > 1) {
         this.props.setFindValue(val);
       }
@@ -224,27 +266,54 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
       this.clearHide();
     } else {
       const diff = Math.abs(val.length - this.state.hideInputValue.length);
+      this.hideAutoComplete.setInput(val, [' ', '!']);
       this.setState({ hideInputValue: val, hideError: undefined });
-      // assume autocomplete or paste if length change is greater than a single key, so submit
+      // submit if length change is greater than a single key, assume browser suggestion clicked or user paste
       if (diff > 1) {
         this.props.setHideValue(val);
       }
     }
   };
 
-  private checkSubmitFind = event => {
+  private checkSpecialKeyFind = event => {
     const keyCode = event.keyCode ? event.keyCode : event.which;
-    if (keyCode === 13) {
-      event.preventDefault();
-      this.submitFind();
+    switch (keyCode) {
+      case 9: // tab (autocomplete)
+        event.preventDefault();
+        const next = this.findAutoComplete.next();
+        if (!!next) {
+          this.findInputRef.value = next;
+          this.findInputRef.scrollLeft = this.findInputRef.scrollWidth;
+          this.setState({ findInputValue: next, findError: undefined });
+        }
+        break;
+      case 13: // return (submit)
+        event.preventDefault();
+        this.submitFind();
+        break;
+      default:
+        break;
     }
   };
 
-  private checkSubmitHide = event => {
+  private checkSpecialKeyHide = event => {
     const keyCode = event.keyCode ? event.keyCode : event.which;
-    if (keyCode === 13) {
-      event.preventDefault();
-      this.submitHide();
+    switch (keyCode) {
+      case 9: // tab (autocomplete)
+        event.preventDefault();
+        const next = this.hideAutoComplete.next();
+        if (!!next) {
+          this.hideInputRef.value = next;
+          this.hideInputRef.scrollLeft = this.hideInputRef.scrollWidth;
+          this.setState({ hideInputValue: next, hideError: undefined });
+        }
+        break;
+      case 13: // return (submit)
+        event.preventDefault();
+        this.submitHide();
+        break;
+      default:
+        break;
     }
   };
 
@@ -267,6 +336,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     if (htmlInputElement !== null) {
       htmlInputElement.value = '';
     }
+    this.findAutoComplete.setInput('');
     this.setState({ findInputValue: '', findError: undefined });
     this.props.setFindValue('');
   };
@@ -278,19 +348,14 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     if (htmlInputElement !== null) {
       htmlInputElement.value = '';
     }
+    this.hideAutoComplete.setInput('');
     this.setState({ hideInputValue: '', hideError: undefined });
     this.props.setHideValue('');
   };
 
-  private handleHide = (
-    cy: any,
-    hideChanged: boolean,
-    graphChanged: boolean,
-    compressOnHideChanged: boolean,
-    layoutChanged: boolean
-  ) => {
+  private handleHide = (cy: any, hideChanged: boolean, graphChanged: boolean, compressOnHideChanged: boolean) => {
     const selector = this.parseValue(this.props.hideValue, false);
-    let prevRemoved = this.removedElements;
+    console.debug(`Hide selector=[${selector}]`);
 
     cy.startBatch();
 
@@ -300,7 +365,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     }
     this.hiddenElements = undefined;
 
-    // restore removed elements when we are working with the same graph. . Either way,release for garbage collection.  If the graph has changed
+    // restore removed elements when we are working with the same graph. Either way,release for garbage collection.  If the graph has changed
     if (!!this.removedElements && !graphChanged) {
       this.removedElements.restore();
     }
@@ -338,55 +403,14 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     cy.endBatch();
 
     const hasRemovedElements: boolean = !!this.removedElements && this.removedElements.length > 0;
-    const same = this.areSameElements(prevRemoved, this.removedElements);
-    prevRemoved = undefined;
     if (hideChanged || (compressOnHideChanged && selector) || hasRemovedElements) {
-      const zoom = cy.zoom();
-      const pan = cy.pan();
-
-      // I don't know why but for some reason the first layout may not leave some elements in their final
-      // position.  Running the layout a second time seems to solve the issue, so for now we'll take the hit
-      // when removing nodes and run it a second time.
       CytoscapeGraphUtils.runLayout(cy, this.props.layout);
-      CytoscapeGraphUtils.runLayout(cy, this.props.layout); // intentionally run a second time
-
-      // after the layout perform a fit to minimize movement, unless we need to maintain a custom zoom/pan.
-      // Absorb small zoom/pan changes made by the layout, only re-establish significant, user-generated changes.
-      const zoomChanged = Math.abs(zoom - cy.zoom()) > 0.1;
-      const panChanged = Math.abs(pan.x - cy.pan().x) > 20 || Math.abs(pan.y - cy.pan().y) > 20;
-
-      if (!same || compressOnHideChanged || layoutChanged || !(zoomChanged || panChanged)) {
-        CytoscapeGraphUtils.safeFit(cy);
-      } else {
-        if (zoomChanged) {
-          cy.zoom(zoom);
-        }
-        if (panChanged) {
-          cy.pan(pan);
-        }
-      }
     }
   };
 
-  private areSameElements(elemsA: any, elemsB: any): boolean {
-    if (elemsA === elemsB) {
-      return true;
-    }
-    if (!elemsA || !elemsB) {
-      return false;
-    }
-    if (elemsA.length !== elemsB.length) {
-      return false;
-    }
-    const idsA = elemsA.map(e => e.id).sort();
-    return elemsB
-      .map(e => e.id)
-      .sort()
-      .every((eId, index) => eId === idsA[index]);
-  }
-
   private handleFind = (cy: any) => {
     const selector = this.parseValue(this.props.findValue, true);
+    console.debug(`Find selector=[${selector}]`);
 
     cy.startBatch();
     // unhighlight old find-hits
@@ -415,30 +439,32 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
       return undefined;
     }
 
-    preparedVal = preparedVal.replace(/ and /gi, ' AND ');
-    preparedVal = preparedVal.replace(/ or /gi, ' OR ');
-    const conjunctive = preparedVal.includes(' AND ');
-    const disjunctive = preparedVal.includes(' OR ');
-    if (conjunctive && disjunctive) {
-      return this.setError(`Expression can not contain both 'AND' and 'OR'`, isFind);
-    }
-    const separator = disjunctive ? ',' : '';
-    const expressions = disjunctive ? preparedVal.split(' OR ') : preparedVal.split(' AND ');
-    let selector;
+    // generate separate selectors for each disjunctive clause and then stitch them together. This
+    // lets us mix node and edge criteria.
+    const orClauses = preparedVal.split(' OR ');
+    let orSelector;
 
-    for (const expression of expressions) {
-      const parsedExpression = this.parseExpression(expression, conjunctive, disjunctive, isFind);
-      if (!parsedExpression) {
-        return undefined;
+    for (const clause of orClauses) {
+      const expressions = clause.split(' AND ');
+      const conjunctive = expressions.length > 1;
+      let selector;
+
+      for (const expression of expressions) {
+        const parsedExpression = this.parseExpression(expression, conjunctive, isFind);
+        if (!parsedExpression) {
+          return undefined;
+        }
+        selector = this.appendSelector(selector, parsedExpression, isFind);
+        if (!selector) {
+          return undefined;
+        }
       }
-      selector = this.appendSelector(selector, parsedExpression, separator, isFind);
-      if (!selector) {
-        return undefined;
-      }
+      // parsed successfully, clear any previous error message
+      this.setError(undefined, isFind);
+      orSelector = !orSelector ? selector : `${orSelector},${selector}`;
     }
-    // parsed successfully, clear any previous error message
-    this.setError(undefined, isFind);
-    return selector;
+
+    return orSelector;
   };
 
   private prepareValue = (val: string): string => {
@@ -460,13 +486,17 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
     val = val.replace(/ contains /gi, ' *= ');
     val = val.replace(/ startswith /gi, ' ^= ');
     val = val.replace(/ endswith /gi, ' $= ');
+
+    // uppercase conjunctions
+    val = val.replace(/ and /gi, ' AND ');
+    val = val.replace(/ or /gi, ' OR ');
+
     return val.trim();
   };
 
   private parseExpression = (
     expression: string,
     conjunctive: boolean,
-    disjunctive: boolean,
     isFind: boolean
   ): ParsedExpression | undefined => {
     let op;
@@ -539,9 +569,7 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
       }
       case 'name': {
         const isNegation = op.startsWith('!');
-        if (disjunctive && isNegation) {
-          return this.setError(`Can not use 'OR' with negated 'name' operand`, isFind);
-        } else if (conjunctive) {
+        if (conjunctive) {
           return this.setError(`Can not use 'AND' with 'name' operand`, isFind);
         }
         const agg = `[${CyNode.aggregateValue} ${op} "${val}"]`;
@@ -695,6 +723,13 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
         return { target: 'node', selector: isNegation ? `[^${CyNode.isDead}]` : `[?${CyNode.isDead}]` };
       case 'inaccessible':
         return { target: 'node', selector: isNegation ? `[^${CyNode.isInaccessible}]` : `[?${CyNode.isInaccessible}]` };
+      case 'healthy':
+        return {
+          target: 'node',
+          selector: isNegation
+            ? `[${CyNode.healthStatus} != "${HEALTHY.name}"]`
+            : `[${CyNode.healthStatus} = "${HEALTHY.name}"]`
+        };
       case 'outside':
       case 'outsider':
         return { target: 'node', selector: isNegation ? `[^${CyNode.isOutside}]` : `[?${CyNode.isOutside}]` };
@@ -736,16 +771,15 @@ export class GraphFind extends React.Component<GraphFindProps, GraphFindState> {
   private appendSelector = (
     selector: string,
     parsedExpression: ParsedExpression,
-    separator: string,
     isFind: boolean
   ): string | undefined => {
     if (!selector) {
       return parsedExpression.target + parsedExpression.selector;
     }
     if (!selector.startsWith(parsedExpression.target)) {
-      return this.setError('Invalid expression. Can not mix node and edge criteria.', isFind);
+      return this.setError('Invalid expression. Can not AND node and edge criteria.', isFind);
     }
-    return selector + separator + parsedExpression.selector;
+    return selector + parsedExpression.selector;
   };
 }
 

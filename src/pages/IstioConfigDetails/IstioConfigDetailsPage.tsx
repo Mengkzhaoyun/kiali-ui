@@ -10,16 +10,14 @@ import {
 import * as AlertUtils from '../../utils/AlertUtils';
 import * as API from '../../services/Api';
 import AceEditor from 'react-ace';
-import 'brace/mode/yaml';
-import 'brace/theme/eclipse';
-import { ObjectReference, ObjectValidation } from '../../types/IstioObjects';
+import 'ace-builds/src-noconflict/mode-yaml';
+import 'ace-builds/src-noconflict/theme-eclipse';
+import { ObjectReference, ObjectValidation, ValidationMessage } from '../../types/IstioObjects';
 import { AceValidations, jsYaml, parseKialiValidations, parseYamlValidations } from '../../types/AceValidations';
 import IstioActionDropdown from '../../components/IstioActions/IstioActionsDropdown';
 import { RenderComponentScroll, RenderHeader } from '../../components/Nav/Page';
 import './IstioConfigDetailsPage.css';
 import { default as IstioActionButtonsContainer } from '../../components/IstioActions/IstioActionsButtons';
-import VirtualServiceDetail from './IstioObjectDetails/VirtualServiceDetail';
-import DestinationRuleDetail from './IstioObjectDetails/DestinationRuleDetail';
 import history from '../../app/History';
 import { Paths } from '../../config';
 import { MessageType } from '../../types/MessageCenter';
@@ -27,34 +25,34 @@ import { getIstioObject, mergeJsonPatch } from '../../utils/IstioConfigUtils';
 import { style } from 'typestyle';
 import ParameterizedTabs, { activeTab } from '../../components/Tab/Tabs';
 import {
-  Card,
-  CardBody,
-  CardHeader,
-  EmptyState,
-  EmptyStateBody,
-  EmptyStateIcon,
-  EmptyStateVariant,
-  Grid,
-  GridItem,
-  Stack,
-  StackItem,
-  Tab,
-  Title,
-  TitleLevel,
-  TitleSize
+  Drawer,
+  DrawerActions,
+  DrawerCloseButton,
+  DrawerContent,
+  DrawerContentBody,
+  DrawerHead,
+  DrawerPanelContent,
+  Tab
 } from '@patternfly/react-core';
-import { KialiIcon } from '../../config/KialiIcon';
 import { dicIstioType } from '../../types/IstioConfigList';
 import { showInMessageCenter } from '../../utils/IstioValidationUtils';
-import { PfColors } from '../../components/Pf/PfColors';
-import { ReferenceIstioObjectLink } from '../../components/Link/IstioObjectLink';
+import VirtualServiceOverview from './IstioObjectDetails/VirtualServiceOverview';
+import DestinationRuleOverview from './IstioObjectDetails/DestinationRuleOverview';
+import { AxiosError } from 'axios';
+import IstioStatusMessageList from './IstioObjectDetails/IstioStatusMessageList';
+import { Annotation } from 'react-ace/types';
+import ValidationReferences from './ValidationReferences';
+import RefreshButtonContainer from '../../components/Refresh/RefreshButton';
+
+// Enables the search box for the ACEeditor
+require('ace-builds/src-noconflict/ext-searchbox');
 
 const rightToolbarStyle = style({
-  position: 'absolute',
-  right: '20px',
-  zIndex: 1,
-  marginTop: '8px',
-  backgroundColor: PfColors.White
+  zIndex: 500
+});
+
+const editorDrawer = style({
+  margin: '0'
 });
 
 // TODO perhaps we may want to enable automatic refresh in all list/details pages
@@ -70,16 +68,17 @@ interface IstioConfigDetailsState {
   yamlModified?: string;
   yamlValidations?: AceValidations;
   currentTab: string;
+  isExpanded: boolean;
 }
 
 const tabName = 'list';
 const paramToTab: { [key: string]: number } = {
-  overview: 0,
-  yaml: 1
+  yaml: 0
 };
 
 class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioConfigId>, IstioConfigDetailsState> {
   aceEditorRef: React.RefObject<AceEditor>;
+  drawerRef: React.RefObject<IstioConfigDetailsPage>;
   promptTo: string;
   timerId: number;
 
@@ -88,15 +87,17 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
     this.state = {
       isModified: false,
       isRemoved: false,
-      currentTab: activeTab(tabName, this.defaultTab())
+      currentTab: activeTab(tabName, this.defaultTab()),
+      isExpanded: false
     };
     this.aceEditorRef = React.createRef();
+    this.drawerRef = React.createRef();
     this.promptTo = '';
     this.timerId = -1;
   }
 
   defaultTab() {
-    return this.hasOverview() ? 'overview' : 'yaml';
+    return 'yaml';
   }
 
   objectTitle() {
@@ -109,7 +110,6 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
         title = object.metadata.name;
       }
     }
-
     return title;
   }
 
@@ -160,15 +160,19 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
     // Note that adapters/templates are not supported yet for validations
     promiseConfigDetails
       .then(resultConfigDetails => {
-        this.setState({
-          istioObjectDetails: resultConfigDetails.data,
-          originalIstioObjectDetails: resultConfigDetails.data,
-          istioValidations: resultConfigDetails.data.validation,
-          originalIstioValidations: resultConfigDetails.data.validation,
-          isModified: false,
-          yamlModified: '',
-          currentTab: activeTab(tabName, this.defaultTab())
-        });
+        this.setState(
+          {
+            istioObjectDetails: resultConfigDetails.data,
+            originalIstioObjectDetails: resultConfigDetails.data,
+            istioValidations: resultConfigDetails.data.validation,
+            originalIstioValidations: resultConfigDetails.data.validation,
+            isModified: false,
+            isExpanded: this.isExpanded(resultConfigDetails.data),
+            yamlModified: '',
+            currentTab: activeTab(tabName, this.defaultTab())
+          },
+          () => this.resizeEditor()
+        );
       })
       .catch(error => {
         this.setState({
@@ -197,14 +201,21 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
     // Hack to force redisplay of annotations after update
     // See https://github.com/securingsincity/react-ace/issues/300
     if (this.aceEditorRef.current) {
+      const editor = this.aceEditorRef.current!['editor'];
+
       // tslint:disable-next-line
-      this.aceEditorRef.current!['editor'].onChangeAnnotation();
+      editor.onChangeAnnotation();
+
+      // Fold Status field
+      const { startRow, endRow } = this.getStatusRange(this.fetchYaml());
+      if (!this.state.isModified) {
+        editor.session.foldAll(startRow, endRow, 0);
+      }
     }
 
-    if (this.state.currentTab !== activeTab(tabName, this.defaultTab())) {
-      this.setState({
-        currentTab: activeTab(tabName, this.defaultTab())
-      });
+    const active = activeTab(tabName, this.defaultTab());
+    if (this.state.currentTab !== active) {
+      this.setState({ currentTab: active });
     }
 
     if (!this.propsMatch(prevProps)) {
@@ -245,24 +256,7 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
   };
 
   onCancel = () => {
-    if (this.hasOverview()) {
-      this.setState(
-        prevState => {
-          return {
-            isModified: false,
-            yamlModified: '',
-            currentTab: 'overview',
-            istioObjectDetails: prevState.originalIstioObjectDetails,
-            istioValidations: prevState.originalIstioValidations
-          };
-        },
-        () => {
-          this.props.history.push(this.props.location.pathname + '?list=overview');
-        }
-      );
-    } else {
-      this.backToList();
-    }
+    this.backToList();
   };
 
   onDelete = () => {
@@ -300,8 +294,54 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
         })
         .catch(error => {
           AlertUtils.addError('Could not update IstioConfig details.', error);
+          this.setState({
+            yamlValidations: this.injectGalleyError(error)
+          });
         });
     });
+  };
+
+  injectGalleyError = (error: AxiosError): AceValidations => {
+    const msg: string[] = API.getErrorString(error).split(':');
+    const errMsg: string = msg.slice(1, msg.length).join(':');
+    const anno: Annotation = {
+      column: 0,
+      row: 0,
+      text: errMsg,
+      type: 'error'
+    };
+
+    return { annotations: [anno], markers: [] };
+  };
+
+  resizeEditor = () => {
+    if (this.aceEditorRef.current) {
+      // The Drawer has an async animation that needs a timeout before to resize the editor
+      setTimeout(() => {
+        const editor = this.aceEditorRef.current!['editor'];
+        editor.resize(true);
+      }, 250);
+    }
+  };
+
+  onDrawerToggle = () => {
+    this.setState(
+      prevState => {
+        return {
+          isExpanded: !prevState.isExpanded
+        };
+      },
+      () => this.resizeEditor()
+    );
+  };
+
+  onDrawerClose = () => {
+    this.setState(
+      {
+        isExpanded: false
+      },
+      () => this.resizeEditor()
+    );
   };
 
   onEditorChange = (value: string) => {
@@ -331,16 +371,65 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
     return istioObject ? jsYaml.safeDump(istioObject, safeDumpOptions) : '';
   };
 
+  getStatusMessages = (): ValidationMessage[] => {
+    const istioObject = getIstioObject(this.state.istioObjectDetails);
+    return istioObject && istioObject.status && istioObject.status.validationMessages
+      ? istioObject.status.validationMessages
+      : ([] as ValidationMessage[]);
+  };
+
+  // Not all Istio types have an overview card
+  hasOverview = (): boolean => {
+    return (
+      this.props.match.params.objectType === 'virtualservices' ||
+      this.props.match.params.objectType === 'destinationrules'
+    );
+  };
+
   objectReferences = (): ObjectReference[] => {
     const istioValidations: ObjectValidation = this.state.istioValidations || ({} as ObjectValidation);
     return istioValidations.references || ([] as ObjectReference[]);
   };
 
+  getStatusRange = (yaml: string | undefined): any => {
+    let range = {
+      startRow: -1,
+      endRow: -1
+    };
+
+    if (!!yaml) {
+      const ylines = yaml.split('\n');
+      ylines.forEach((line: string, i: number) => {
+        if (line.startsWith('status:')) {
+          range.startRow = i;
+        }
+        if (line.startsWith('spec:') && range.startRow !== -1) {
+          range.endRow = i;
+        }
+      });
+    }
+
+    return range;
+  };
+
+  isExpanded = (istioConfigDetails?: IstioConfigDetails) => {
+    let isExpanded = false;
+    if (istioConfigDetails) {
+      isExpanded = this.showCards(this.objectReferences().length > 0, this.getStatusMessages());
+    }
+    return isExpanded;
+  };
+
+  showCards = (refPresent: boolean, istioStatusMsgs: ValidationMessage[]): boolean => {
+    return refPresent || this.hasOverview() || istioStatusMsgs.length > 0;
+  };
+
   renderEditor = () => {
     const yamlSource = this.fetchYaml();
+    const istioStatusMsgs = this.getStatusMessages();
     const objectReferences = this.objectReferences();
     const refPresent = objectReferences.length > 0;
-    const editorSpan = refPresent ? 9 : 12;
+    const showCards = this.showCards(refPresent, istioStatusMsgs);
     let editorValidations: AceValidations = {
       markers: [],
       annotations: []
@@ -354,61 +443,75 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
       }
     }
 
+    const panelContent = (
+      <DrawerPanelContent>
+        <DrawerHead>
+          <div>
+            {showCards && (
+              <>
+                {this.state.istioObjectDetails && this.state.istioObjectDetails.virtualService && (
+                  <VirtualServiceOverview
+                    virtualService={this.state.istioObjectDetails.virtualService}
+                    validation={this.state.istioValidations}
+                    namespace={this.state.istioObjectDetails.namespace.name}
+                  />
+                )}
+                {this.state.istioObjectDetails && this.state.istioObjectDetails.destinationRule && (
+                  <DestinationRuleOverview
+                    destinationRule={this.state.istioObjectDetails.destinationRule}
+                    validation={this.state.istioValidations}
+                    namespace={this.state.istioObjectDetails.namespace.name}
+                  />
+                )}
+                {istioStatusMsgs && istioStatusMsgs.length > 0 && <IstioStatusMessageList messages={istioStatusMsgs} />}
+                {refPresent && <ValidationReferences objectReferences={objectReferences} />}
+              </>
+            )}
+          </div>
+          <DrawerActions>
+            <DrawerCloseButton onClick={this.onDrawerClose} />
+          </DrawerActions>
+        </DrawerHead>
+      </DrawerPanelContent>
+    );
+
+    const editor = this.state.istioObjectDetails ? (
+      <div style={{ width: '100%' }}>
+        <AceEditor
+          ref={this.aceEditorRef}
+          mode="yaml"
+          theme="eclipse"
+          onChange={this.onEditorChange}
+          height={'var(--kiali-yaml-editor-height)'}
+          width={'100%'}
+          className={'istio-ace-editor'}
+          wrapEnabled={true}
+          readOnly={!this.canUpdate()}
+          setOptions={aceOptions}
+          value={this.state.istioObjectDetails ? yamlSource : undefined}
+          annotations={editorValidations.annotations}
+          markers={editorValidations.markers}
+        />
+      </div>
+    ) : null;
+
     return (
-      <>
-        <Grid style={{ margin: '10px' }} gutter={'md'}>
-          <GridItem span={editorSpan}>
-            {this.state.istioObjectDetails ? (
-              <AceEditor
-                ref={this.aceEditorRef}
-                mode="yaml"
-                theme="eclipse"
-                onChange={this.onEditorChange}
-                width={'100%'}
-                height={'var(--kiali-yaml-editor-height)'}
-                className={'istio-ace-editor'}
-                wrapEnabled={true}
-                readOnly={!this.canUpdate()}
-                setOptions={aceOptions}
-                value={this.state.istioObjectDetails ? yamlSource : undefined}
-                annotations={editorValidations.annotations}
-                markers={editorValidations.markers}
-              />
-            ) : null}
-          </GridItem>
-          {refPresent ? (
-            <GridItem span={3}>
-              <Card>
-                <CardHeader>
-                  <Title headingLevel={TitleLevel.h3} size={TitleSize.xl}>
-                    Validation references
-                  </Title>
-                </CardHeader>
-                <CardBody>
-                  <Stack>
-                    {objectReferences.map((reference, i) => {
-                      return (
-                        <StackItem key={'rel-object-' + i}>
-                          <ReferenceIstioObjectLink
-                            name={reference.name}
-                            type={reference.objectType}
-                            namespace={reference.namespace}
-                          />
-                        </StackItem>
-                      );
-                    })}
-                  </Stack>
-                </CardBody>
-              </Card>
-            </GridItem>
-          ) : undefined}
-        </Grid>
-        {this.renderActionButtons()}
-      </>
+      <div className={editorDrawer}>
+        {showCards ? (
+          <Drawer isExpanded={this.state.isExpanded} isInline={true}>
+            <DrawerContent panelContent={showCards ? panelContent : undefined}>
+              <DrawerContentBody>{editor}</DrawerContentBody>
+            </DrawerContent>
+          </Drawer>
+        ) : (
+          editor
+        )}
+        {this.renderActionButtons(showCards)}
+      </div>
     );
   };
 
-  renderActionButtons = () => {
+  renderActionButtons = (showOverview: boolean) => {
     // User won't save if file has yaml errors
     const yamlErrors = !!(this.state.yamlValidations && this.state.yamlValidations.markers.length > 0);
     return (
@@ -419,6 +522,9 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
         onCancel={this.onCancel}
         onUpdate={this.onUpdate}
         onRefresh={this.onRefresh}
+        showOverview={showOverview}
+        overview={this.state.isExpanded}
+        onOverview={this.onDrawerToggle}
       />
     );
   };
@@ -442,97 +548,30 @@ class IstioConfigDetailsPage extends React.Component<RouteComponentProps<IstioCo
     );
   };
 
-  // Not all Istio types have components to render an overview tab
-  hasOverview = (): boolean => {
-    return (
-      this.props.match.params.objectType === 'virtualservices' ||
-      this.props.match.params.objectType === 'destinationrules'
-    );
-  };
-
-  renderOverview = (): any => {
-    if (this.state.istioObjectDetails) {
-      if (this.state.istioObjectDetails.virtualService) {
-        return (
-          <VirtualServiceDetail
-            virtualService={this.state.istioObjectDetails.virtualService}
-            validation={this.state.istioValidations}
-            namespace={this.state.istioObjectDetails.namespace.name}
-          />
-        );
-      }
-      if (this.state.istioObjectDetails.destinationRule) {
-        return (
-          <DestinationRuleDetail
-            destinationRule={this.state.istioObjectDetails.destinationRule}
-            validation={this.state.istioValidations}
-            namespace={this.state.istioObjectDetails.namespace.name}
-          />
-        );
-      }
-    } else {
-      // In theory it shouldn't enter here, but we show a nice error page anyway.
-
-      return (
-        <EmptyState variant={EmptyStateVariant.full}>
-          <EmptyStateIcon icon={KialiIcon.Error} />
-          <Title headingLevel={TitleLevel.h5} size={TitleSize.lg}>
-            Error loading object {this.props.match.params.object}
-          </Title>
-          <EmptyStateBody>
-            This might mean the resource is not ready yet or has been deleted and the cluster has not finished
-            propagating the changes.
-          </EmptyStateBody>
-        </EmptyState>
-      );
-    }
-  };
-
-  renderTabs = (): any => {
-    const tabs: JSX.Element[] = [];
-    if (this.hasOverview()) {
-      tabs.push(
-        <Tab key="istio-overview" title="Overview" eventKey={0}>
-          <RenderComponentScroll>{this.renderOverview()}</RenderComponentScroll>
-        </Tab>
-      );
-    }
-
-    tabs.push(
-      <Tab key="istio-yaml" title={`YAML ${this.state.isModified ? ' * ' : ''}`} eventKey={1}>
-        <RenderComponentScroll>{this.renderEditor()}</RenderComponentScroll>
-      </Tab>
-    );
-
-    return (
-      <ParameterizedTabs
-        id="basic-tabs"
-        onSelect={tabValue => {
-          this.setState({ currentTab: tabValue });
-        }}
-        tabMap={paramToTab}
-        tabName={tabName}
-        defaultTab={this.defaultTab()}
-        activeTab={this.state.currentTab}
-        mountOnEnter={false}
-        unmountOnExit={true}
-      >
-        {tabs}
-      </ParameterizedTabs>
-    );
-  };
-
   render() {
     return (
       <>
-        <RenderHeader location={this.props.location}>
-          {
-            // This magic space will align details header width with Graph, List pages
-          }
-          <div style={{ paddingBottom: 14 }} />
-          {this.renderActions()}
-        </RenderHeader>
-        {this.renderTabs()}
+        <RenderHeader
+          location={this.props.location}
+          rightToolbar={<RefreshButtonContainer key={'Refresh'} handleRefresh={this.onRefresh} />}
+          actionsToolbar={this.renderActions()}
+        />
+        <ParameterizedTabs
+          id="basic-tabs"
+          onSelect={tabValue => {
+            this.setState({ currentTab: tabValue });
+          }}
+          tabMap={paramToTab}
+          tabName={tabName}
+          defaultTab={this.defaultTab()}
+          activeTab={this.state.currentTab}
+          mountOnEnter={false}
+          unmountOnExit={true}
+        >
+          <Tab key="istio-yaml" title={`YAML ${this.state.isModified ? ' * ' : ''}`} eventKey={0}>
+            <RenderComponentScroll>{this.renderEditor()}</RenderComponentScroll>
+          </Tab>
+        </ParameterizedTabs>
         <Prompt
           message={location => {
             if (this.state.isModified) {

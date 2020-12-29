@@ -1,37 +1,23 @@
 import * as React from 'react';
 import { connect } from 'react-redux';
 import { renderDestServicesLinks, renderBadgedLink, renderHealth, renderBadgedHost } from './SummaryLink';
-import { NodeType, SummaryPanelPropType, DecoratedGraphNodeData } from '../../types/Graph';
-import {
-  shouldRefreshData,
-  updateHealth,
-  summaryHeader,
-  summaryPanel,
-  summaryBodyTabs,
-  summaryFont,
-  summaryPanelTopSplit,
-  summaryPanelBottomSplit
-} from './SummaryPanelCommon';
-import { Health } from '../../types/Health';
+import { NodeType, SummaryPanelPropType, DecoratedGraphNodeData, DestService } from '../../types/Graph';
+import { summaryHeader, summaryPanel, summaryBodyTabs, summaryFont } from './SummaryPanelCommon';
 import { decoratedNodeData } from '../../components/CytoscapeGraph/CytoscapeGraphUtils';
 import { KialiIcon } from 'config/KialiIcon';
 import { getOptions, clickHandler } from 'components/CytoscapeGraph/ContextMenu/NodeContextMenu';
-import { Dropdown, DropdownItem, DropdownPosition, KebabToggle, Tab } from '@patternfly/react-core';
+import { Dropdown, DropdownGroup, DropdownItem, DropdownPosition, KebabToggle, Tab } from '@patternfly/react-core';
 import { KialiAppState } from 'store/Store';
 import { SummaryPanelNodeTraffic } from './SummaryPanelNodeTraffic';
 import SummaryPanelNodeTraces from './SummaryPanelNodeTraces';
 import SimpleTabs from 'components/Tab/SimpleTabs';
 import { JaegerState } from 'reducers/JaegerState';
-import SummaryPanelTraceDetails from './SummaryPanelTraceDetails';
 
 type SummaryPanelNodeState = {
-  healthLoading: boolean;
-  health?: Health;
   isActionOpen: boolean;
 };
 
 const defaultState: SummaryPanelNodeState = {
-  healthLoading: false,
   isActionOpen: false
 };
 
@@ -51,18 +37,11 @@ export class SummaryPanelNode extends React.Component<SummaryPanelNodeProps, Sum
     this.mainDivRef = React.createRef<HTMLDivElement>();
   }
 
-  componentDidMount() {
-    updateHealth(this.props.data.summaryTarget, this.setState.bind(this));
-  }
-
   componentDidUpdate(prevProps: SummaryPanelNodeProps) {
     if (prevProps.data.summaryTarget !== this.props.data.summaryTarget) {
       if (this.mainDivRef.current) {
         this.mainDivRef.current.scrollTop = 0;
       }
-    }
-    if (shouldRefreshData(prevProps, this.props)) {
-      updateHealth(this.props.data.summaryTarget, this.setState.bind(this));
     }
   }
 
@@ -79,63 +58,55 @@ export class SummaryPanelNode extends React.Component<SummaryPanelNodeProps, Sum
     const shouldRenderApp = app && ![NodeType.APP, NodeType.UNKNOWN].includes(nodeType);
     const shouldRenderWorkload = workload && ![NodeType.WORKLOAD, NodeType.UNKNOWN].includes(nodeType);
     const shouldRenderTraces =
-      nodeType === NodeType.SERVICE &&
+      !isServiceEntry &&
       !nodeData.isInaccessible &&
       this.props.jaegerState.info &&
       this.props.jaegerState.info.enabled &&
       this.props.jaegerState.info.integration;
-    const mainStyle = this.props.jaegerState.selectedTrace ? summaryPanelTopSplit : summaryPanel;
 
-    const actions = getOptions(nodeData, this.props.jaegerState.info).map(o => {
-      return (
-        <DropdownItem key={o.text} onClick={() => clickHandler(o)}>
-          {o.text}
-        </DropdownItem>
-      );
-    });
+    const actions = [
+      <DropdownGroup
+        label="Show"
+        className="kiali-group-menu"
+        children={getOptions(nodeData).map(o => {
+          return (
+            <DropdownItem key={o.text} onClick={() => clickHandler(o)}>
+              {o.text}
+            </DropdownItem>
+          );
+        })}
+      />
+    ];
 
     return (
-      <>
-        <div ref={this.mainDivRef} className={`panel panel-default ${mainStyle}`}>
-          <div className="panel-heading" style={summaryHeader}>
-            <div>
-              {renderBadgedLink(nodeData)}
-              {!(nodeData.isInaccessible || nodeType === NodeType.AGGREGATE) && (
-                <Dropdown
-                  id="summary-node-actions"
-                  style={{ float: 'right' }}
-                  isPlain={true}
-                  dropdownItems={actions}
-                  isOpen={this.state.isActionOpen}
-                  position={DropdownPosition.right}
-                  toggle={<KebabToggle id="summary-node-kebab" onToggle={this.onToggleActions} />}
-                />
-              )}
-            </div>
-            <div>{renderHealth(this.state.health)}</div>
-            <div>
-              {this.renderBadgeSummary(nodeData.hasCB, nodeData.hasVS, nodeData.hasMissingSC, nodeData.isDead)}
-              {shouldRenderDestsList && <div>{destsList}</div>}
-              {shouldRenderSvcList && <div>{servicesList}</div>}
-              {shouldRenderService && <div>{renderBadgedLink(nodeData, NodeType.SERVICE)}</div>}
-              {shouldRenderApp && <div>{renderBadgedLink(nodeData, NodeType.APP)}</div>}
-              {shouldRenderWorkload && <div>{renderBadgedLink(nodeData, NodeType.WORKLOAD)}</div>}
-            </div>
-          </div>
-          {shouldRenderTraces ? this.renderWithTabs(nodeData) : this.renderTrafficOnly()}
-        </div>
-        {this.props.jaegerState.selectedTrace && (
-          <div className={`panel panel-default ${summaryPanelBottomSplit}`}>
-            <div className="panel-body">
-              <SummaryPanelTraceDetails
-                trace={this.props.jaegerState.selectedTrace}
-                node={node}
-                jaegerURL={this.props.jaegerState.info?.url}
+      <div ref={this.mainDivRef} className={`panel panel-default ${summaryPanel}`}>
+        <div className="panel-heading" style={summaryHeader}>
+          <div>
+            {renderBadgedLink(nodeData)}
+            {!(nodeData.isInaccessible || nodeType === NodeType.AGGREGATE) && (
+              <Dropdown
+                id="summary-node-actions"
+                style={{ float: 'right' }}
+                isPlain={true}
+                dropdownItems={actions}
+                isOpen={this.state.isActionOpen}
+                position={DropdownPosition.right}
+                toggle={<KebabToggle id="summary-node-kebab" onToggle={this.onToggleActions} />}
               />
-            </div>
+            )}
           </div>
-        )}
-      </>
+          <div>{renderHealth(nodeData.health)}</div>
+          <div>
+            {this.renderBadgeSummary(nodeData.hasCB, nodeData.hasVS, nodeData.hasMissingSC, nodeData.isDead)}
+            {shouldRenderDestsList && <div>{destsList}</div>}
+            {shouldRenderSvcList && <div>{servicesList}</div>}
+            {shouldRenderService && <div>{renderBadgedLink(nodeData, NodeType.SERVICE)}</div>}
+            {shouldRenderApp && <div>{renderBadgedLink(nodeData, NodeType.APP)}</div>}
+            {shouldRenderWorkload && <div>{renderBadgedLink(nodeData, NodeType.WORKLOAD)}</div>}
+          </div>
+        </div>
+        {shouldRenderTraces ? this.renderWithTabs(nodeData) : this.renderTrafficOnly()}
+      </div>
     );
   }
 
@@ -157,11 +128,7 @@ export class SummaryPanelNode extends React.Component<SummaryPanelNodeProps, Sum
             </div>
           </Tab>
           <Tab style={summaryFont} title="Traces" eventKey={1}>
-            <SummaryPanelNodeTraces
-              namespace={nodeData.namespace}
-              app={nodeData.app || nodeData.service!}
-              queryTime={this.props.queryTime}
-            />
+            <SummaryPanelNodeTraces nodeData={nodeData} queryTime={this.props.queryTime - this.props.duration} />
           </Tab>
         </SimpleTabs>
       </div>
@@ -207,7 +174,7 @@ export class SummaryPanelNode extends React.Component<SummaryPanelNodeProps, Sum
   };
 
   private renderDestServices = (data: DecoratedGraphNodeData) => {
-    const destServices = data.destServices;
+    const destServices: DestService[] | undefined = data.destServices;
 
     const entries: any[] = [];
     if (!destServices) {

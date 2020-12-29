@@ -4,21 +4,19 @@ import { CaretDownIcon } from '@patternfly/react-icons';
 import { serverConfig } from '../../config';
 import { Workload } from '../../types/Workload';
 import {
-  buildWorkloadThreeScalePatch,
-  isThreeScaleLinked,
-  WIZARD_THREESCALE_LINK,
-  WIZARD_THREESCALE_UNLINK
+  buildWorkloadInjectionPatch,
+  WIZARD_DISABLE_AUTO_INJECTION,
+  WIZARD_ENABLE_AUTO_INJECTION,
+  WIZARD_REMOVE_AUTO_INJECTION
 } from './WizardActions';
-import WorkloadWizard from './WorkloadWizard';
-import { IstioRule } from '../../types/IstioObjects';
 import * as API from '../../services/Api';
 import * as AlertUtils from '../../utils/AlertUtils';
 import { MessageType } from '../../types/MessageCenter';
+import EnvoyDetailsModal from '../Envoy/EnvoyModal';
 
 interface Props {
   namespace: string;
   workload: Workload;
-  rules: IstioRule[];
   onChange: () => void;
 }
 
@@ -50,17 +48,21 @@ class WorkloadWizardDropdown extends React.Component<Props, State> {
     });
   };
 
+  onWizardToggle = (isOpen: boolean) => {
+    this.setState({
+      showWizard: isOpen
+    });
+  };
+
   onAction = (key: string) => {
     switch (key) {
-      case WIZARD_THREESCALE_LINK:
-        this.setState({
-          showWizard: true,
-          type: WIZARD_THREESCALE_LINK
-        });
-        break;
-      case WIZARD_THREESCALE_UNLINK:
-        const jsonPatch = buildWorkloadThreeScalePatch(false, this.props.workload.type, '', '');
-        API.updateWorkload(this.props.namespace, this.props.workload.name, this.props.workload.type, jsonPatch)
+      case WIZARD_ENABLE_AUTO_INJECTION:
+      case WIZARD_DISABLE_AUTO_INJECTION:
+      case WIZARD_REMOVE_AUTO_INJECTION:
+        const remove = key === WIZARD_REMOVE_AUTO_INJECTION;
+        const enable = key === WIZARD_ENABLE_AUTO_INJECTION;
+        const jsonInjectionPatch = buildWorkloadInjectionPatch(this.props.workload.type, enable, remove);
+        API.updateWorkload(this.props.namespace, this.props.workload.name, this.props.workload.type, jsonInjectionPatch)
           .then(_ => {
             AlertUtils.add('Workload ' + this.props.workload.name + ' updated', 'default', MessageType.SUCCESS);
             this.setState(
@@ -85,7 +87,7 @@ class WorkloadWizardDropdown extends React.Component<Props, State> {
     }
   };
 
-  onClose = (changed: boolean) => {
+  onClose = (changed?: boolean) => {
     this.setState({ showWizard: false });
     if (changed) {
       this.props.onChange();
@@ -94,28 +96,61 @@ class WorkloadWizardDropdown extends React.Component<Props, State> {
 
   renderDropdownItems = (): JSX.Element[] => {
     const items: JSX.Element[] = [];
-    if (serverConfig.extensions?.threescale.enabled && this.props.workload) {
-      if (isThreeScaleLinked(this.props.workload)) {
-        items.push(
-          <DropdownItem
-            key={WIZARD_THREESCALE_UNLINK}
-            component="button"
-            onClick={() => this.onAction(WIZARD_THREESCALE_UNLINK)}
-          >
-            Unlink 3scale Authorization
-          </DropdownItem>
-        );
+    if (serverConfig.kialiFeatureFlags.istioInjectionAction) {
+      const enableAction = (
+        <DropdownItem
+          key={WIZARD_ENABLE_AUTO_INJECTION}
+          component="button"
+          onClick={() => this.onAction(WIZARD_ENABLE_AUTO_INJECTION)}
+        >
+          Enable Auto Injection
+        </DropdownItem>
+      );
+      const disableAction = (
+        <DropdownItem
+          key={WIZARD_DISABLE_AUTO_INJECTION}
+          component="button"
+          onClick={() => this.onAction(WIZARD_DISABLE_AUTO_INJECTION)}
+        >
+          Disable Auto Injection
+        </DropdownItem>
+      );
+      const removeAction = (
+        <DropdownItem
+          key={WIZARD_REMOVE_AUTO_INJECTION}
+          component="button"
+          onClick={() => this.onAction(WIZARD_REMOVE_AUTO_INJECTION)}
+        >
+          Remove Auto Injection
+        </DropdownItem>
+      );
+
+      const envoyAction = (
+        <DropdownItem
+          key="envoy-details"
+          component="button"
+          onClick={() => this.onWizardToggle(true)}
+          isDisabled={!this.props.workload.istioSidecar}
+        >
+          Show Envoy Details
+        </DropdownItem>
+      );
+
+      if (this.props.workload.istioInjectionAnnotation !== undefined && this.props.workload.istioInjectionAnnotation) {
+        items.push(disableAction);
+        items.push(removeAction);
+      } else if (
+        this.props.workload.istioInjectionAnnotation !== undefined &&
+        !this.props.workload.istioInjectionAnnotation
+      ) {
+        items.push(enableAction);
+        items.push(removeAction);
       } else {
-        items.push(
-          <DropdownItem
-            key={WIZARD_THREESCALE_LINK}
-            component="button"
-            onClick={() => this.onAction(WIZARD_THREESCALE_LINK)}
-          >
-            Link 3scale Authorization
-          </DropdownItem>
-        );
+        // If sidecar is present, we offer first the disable action
+        items.push(this.props.workload.istioSidecar ? disableAction : enableAction);
       }
+
+      items.push(envoyAction);
     }
     return items;
   };
@@ -138,17 +173,18 @@ class WorkloadWizardDropdown extends React.Component<Props, State> {
         style={{ pointerEvents: validActions ? 'auto' : 'none' }}
       />
     );
+    // TODO WorkloadWizard component contains only 3scale actions but in the future we may need to bring it back
     return (
       <>
         {dropdown}
-        <WorkloadWizard
-          show={this.state.showWizard}
-          type={this.state.type}
-          namespace={this.props.namespace}
-          workload={this.props.workload}
-          rules={this.props.rules}
-          onClose={this.onClose}
-        />
+        {this.state.showWizard ? (
+          <EnvoyDetailsModal
+            namespace={this.props.namespace}
+            workload={this.props.workload}
+            show={this.state.showWizard}
+            onClose={this.onClose}
+          />
+        ) : undefined}
       </>
     );
   }
